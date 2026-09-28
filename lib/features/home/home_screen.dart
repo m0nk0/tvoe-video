@@ -9,6 +9,7 @@ import '../../data/models/video_project.dart';
 import '../../data/providers/project_provider.dart';
 import '../../data/providers/projects_provider.dart';
 import '../editor/editor_screen.dart';
+import '../templates/templates_screen.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -74,14 +75,7 @@ class HomeScreen extends ConsumerWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          ref.read(currentProjectProvider.notifier).clearProject();
-          ref.read(selectedPhotoIndexProvider.notifier).state = 0;
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const EditorScreen()),
-          );
-        },
+        onPressed: () => _showCreateOptions(context, ref),
         backgroundColor: AppColors.primary,
         elevation: 4,
         icon: const Icon(Icons.add, size: 24, color: Colors.white),
@@ -91,6 +85,81 @@ class HomeScreen extends ConsumerWidget {
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+
+  void _showCreateOptions(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
+        return SafeArea(
+          top: false,
+          minimum: EdgeInsets.only(bottom: systemBottomInset),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Text(
+                  'Новый проект',
+                  style: GoogleFonts.unbounded(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Выберите, как начать работу',
+                  style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textMuted),
+                ),
+                const SizedBox(height: 20),
+                _OptionTile(
+                  icon: Icons.add_photo_alternate,
+                  title: 'Пустой проект',
+                  subtitle: 'Начните с нуля — добавьте фото и настройте вручную',
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    ref.read(currentProjectProvider.notifier).clearProject();
+                    ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const EditorScreen()),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                _OptionTile(
+                  icon: Icons.auto_awesome,
+                  title: 'Из шаблона',
+                  subtitle: 'Быстрый старт с готовыми настройками',
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const TemplatesScreen()),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -214,48 +283,46 @@ class _ProjectCard extends ConsumerWidget {
   }
 
   void _showProjectMenu(BuildContext context, WidgetRef ref) {
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: AppColors.surface,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (sheetContext) {
-      // Ручная высота системной панели (useSafeArea на этом устройстве не работает)
-      final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
-
-      return SafeArea(
-        top: false,
-        minimum: EdgeInsets.only(bottom: systemBottomInset),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.edit_outlined, color: AppColors.textPrimary),
-                title: Text('Переименовать', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _showRenameDialog(context, ref);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: AppColors.error),
-                title: Text('Удалить', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.error)),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _showDeleteDialog(context, ref);
-                },
-              ),
-            ],
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
+        return SafeArea(
+          top: false,
+          minimum: EdgeInsets.only(bottom: systemBottomInset),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined, color: AppColors.textPrimary),
+                  title: Text('Переименовать', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showRenameDialog(context, ref);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: AppColors.error),
+                  title: Text('Удалить', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.error)),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showDeleteDialog(context, ref);
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
-      );
-    },
-  );
-}
+        );
+      },
+    );
+  }
 
   void _showRenameDialog(BuildContext context, WidgetRef ref) {
     final controller = TextEditingController(text: project.name);
@@ -325,6 +392,70 @@ class _ProjectCard extends ConsumerWidget {
             child: Text('Удалить', style: GoogleFonts.manrope(color: AppColors.error)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// Плитка опций создания проекта
+// ==========================================
+class _OptionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _OptionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+              ),
+              child: Icon(icon, color: AppColors.primary, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.unbounded(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.manrope(fontSize: 13, color: AppColors.textMuted, height: 1.3),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 24),
+          ],
+        ),
       ),
     );
   }

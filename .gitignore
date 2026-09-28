@@ -56,3 +56,6 @@ ios/.symlinks/
 # Hive
 *.hive
 *.lock
+
+# Android build artifacts
+android/build/
