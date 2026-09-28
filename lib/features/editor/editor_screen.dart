@@ -10,6 +10,31 @@ import '../../core/theme/colors.dart';
 import '../../data/models/photo_layer.dart';
 import '../../data/providers/project_provider.dart';
 import '../../data/providers/projects_provider.dart';
+import 'text_tools.dart';
+
+// ==========================================
+// Общее управление воспроизведением
+// ==========================================
+void togglePlayback(WidgetRef ref) {
+  final photos = ref.read(currentProjectProvider).photos;
+  if (photos.isEmpty) return;
+  final total = photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
+  final playing = ref.read(isPlayingProvider);
+  // Если стоим в конце — начинаем заново
+  if (!playing && ref.read(playheadMsProvider) >= total) {
+    ref.read(playheadMsProvider.notifier).state = 0;
+  }
+  ref.read(isPlayingProvider.notifier).state = !playing;
+}
+
+void _step(WidgetRef ref, int delta) {
+  final photos = ref.read(currentProjectProvider).photos;
+  if (photos.isEmpty) return;
+  final cur = ref.read(selectedPhotoIndexProvider);
+  final next = (cur + delta).clamp(0, photos.length - 1);
+  ref.read(selectedPhotoIndexProvider.notifier).state = next;
+  ref.read(playheadMsProvider.notifier).state = frameStartMs(photos, next).toDouble();
+}
 
 class EditorScreen extends ConsumerStatefulWidget {
   const EditorScreen({super.key});
@@ -20,9 +45,33 @@ class EditorScreen extends ConsumerStatefulWidget {
 
 class _EditorScreenState extends ConsumerState<EditorScreen> {
   double timelineZoom = 1.0;
+  Timer? _tick;
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  /// Тик воспроизведения: плейхед едет по шкале времени
+  void _startTick() {
+    _tick?.cancel();
+    _tick = Timer.periodic(const Duration(milliseconds: 33), (_) {
+      final photos = ref.read(currentProjectProvider).photos;
+      final total = photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
+      if (total <= 0) return;
+      double ms = ref.read(playheadMsProvider) + 33;
+      if (ms >= total) {
+        ms = total;
+        ref.read(isPlayingProvider.notifier).state = false;
+      }
+      ref.read(playheadMsProvider.notifier).state = ms;
+    });
+  }
 
   /// Сохраняем проект в Hive и выходим
   Future<void> _saveAndPop() async {
+    ref.read(isPlayingProvider.notifier).state = false;
     final project = ref.read(currentProjectProvider);
     if (project.photos.isNotEmpty) {
       await ref.read(projectRepositoryProvider).saveProject(project);
@@ -33,6 +82,15 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Синхронизируем тикер с состоянием воспроизведения
+    ref.listen<bool>(isPlayingProvider, (prev, playing) {
+      if (playing) {
+        _startTick();
+      } else {
+        _tick?.cancel();
+      }
+    });
+
     final project = ref.watch(currentProjectProvider);
 
     return PopScope(
@@ -65,8 +123,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
             ),
           ],
         ),
-        // ✅ НОВЫЙ UX: превью занимает всё свободное место,
-        // тулбар и таймлайн — компактные фиксированные полосы
         body: SafeArea(
           child: Column(
             children: [
@@ -74,18 +130,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
               const Expanded(child: _PreviewArea()),
               Container(height: 1, color: AppColors.surfaceLight),
 
-              // B. Панель инструментов — фиксированная высота
+              // B. Панель инструментов
               SizedBox(
                 height: 92,
                 child: _Toolbar(
                   onAddPhoto: () => ref.read(currentProjectProvider.notifier).addPhotosFromGallery(),
+                  onAddText: () => showTextManagerSheet(context, ref),
                 ),
               ),
               Container(height: 1, color: AppColors.surfaceLight),
 
-              // C. Таймлайн — компактная полоса
+              // C. Таймлайн с непрерывным плейхедом
               SizedBox(
-                height: 150,
+                height: 170,
                 child: _Timeline(
                   zoom: timelineZoom,
                   onZoomChanged: (value) => setState(() => timelineZoom = value),
@@ -100,69 +157,21 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 }
 
 // ==========================================
-// A. Превью: слайд-шоу с переходами
+// A. Превью: слайд-шоу с переходами + текст
 // ==========================================
-class _PreviewArea extends ConsumerStatefulWidget {
+class _PreviewArea extends ConsumerWidget {
   const _PreviewArea();
 
   @override
-  ConsumerState<_PreviewArea> createState() => _PreviewAreaState();
-}
-
-class _PreviewAreaState extends ConsumerState<_PreviewArea> {
-  Timer? _playTimer;
-  bool _isPlaying = false;
-
-  @override
-  void dispose() {
-    _playTimer?.cancel();
-    super.dispose();
-  }
-
-  void _scheduleNext() {
-    _playTimer?.cancel();
-    final photos = ref.read(currentProjectProvider).photos;
-    if (photos.isEmpty) return;
-    final index = ref.read(selectedPhotoIndexProvider).clamp(0, photos.length - 1);
-    _playTimer = Timer(photos[index].duration, () {
-      if (!mounted) return;
-      final current = ref.read(currentProjectProvider).photos;
-      if (current.isEmpty) return;
-      final cur = ref.read(selectedPhotoIndexProvider);
-      final next = (cur + 1) % current.length;
-      ref.read(selectedPhotoIndexProvider.notifier).state = next;
-      _scheduleNext();
-    });
-  }
-
-  void _togglePlay() {
-    setState(() => _isPlaying = !_isPlaying);
-    if (_isPlaying) {
-      _scheduleNext();
-    } else {
-      _playTimer?.cancel();
-    }
-  }
-
-  void _step(int delta) {
-    final photos = ref.read(currentProjectProvider).photos;
-    if (photos.isEmpty) return;
-    final cur = ref.read(selectedPhotoIndexProvider);
-    final next = (cur + delta).clamp(0, photos.length - 1);
-    ref.read(selectedPhotoIndexProvider.notifier).state = next;
-    if (_isPlaying) _scheduleNext();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final project = ref.watch(currentProjectProvider);
     final selectedIndex = ref.watch(selectedPhotoIndexProvider);
+    final isPlaying = ref.watch(isPlayingProvider);
     final hasPhotos = project.photos.isNotEmpty;
     final safeIndex = hasPhotos ? selectedIndex.clamp(0, project.photos.length - 1) : 0;
     final currentTransition = hasPhotos ? project.photos[safeIndex].transition : TransitionType.none;
 
     return Center(
-      // ✅ Уменьшили отступы, чтобы превью было крупнее
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: AspectRatio(
@@ -180,6 +189,7 @@ class _PreviewAreaState extends ConsumerState<_PreviewArea> {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
+                        // Кадр с анимированным переходом
                         Positioned.fill(
                           child: AnimatedSwitcher(
                             duration: const Duration(milliseconds: 450),
@@ -199,6 +209,11 @@ class _PreviewAreaState extends ConsumerState<_PreviewArea> {
                             ),
                           ),
                         ),
+
+                        // Текстовые оверлеи (заголовок / субтитры)
+                        ...buildTextOverlays(project, safeIndex),
+
+                        // Панель управления воспроизведением
                         Center(
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -212,20 +227,20 @@ class _PreviewAreaState extends ConsumerState<_PreviewArea> {
                                 IconButton(
                                   icon: const Icon(Icons.skip_previous, color: Colors.white, size: 28),
                                   disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
-                                  onPressed: safeIndex > 0 ? () => _step(-1) : null,
+                                  onPressed: safeIndex > 0 ? () => _step(ref, -1) : null,
                                 ),
                                 IconButton(
                                   icon: Icon(
-                                    _isPlaying ? Icons.pause : Icons.play_arrow,
+                                    isPlaying ? Icons.pause : Icons.play_arrow,
                                     color: Colors.white,
                                     size: 36,
                                   ),
-                                  onPressed: _togglePlay,
+                                  onPressed: () => togglePlayback(ref),
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.skip_next, color: Colors.white, size: 28),
                                   disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
-                                  onPressed: safeIndex < project.photos.length - 1 ? () => _step(1) : null,
+                                  onPressed: safeIndex < project.photos.length - 1 ? () => _step(ref, 1) : null,
                                 ),
                               ],
                             ),
@@ -309,8 +324,9 @@ class _BlurTransition extends StatelessWidget {
 // ==========================================
 class _Toolbar extends StatelessWidget {
   final VoidCallback onAddPhoto;
+  final VoidCallback onAddText;
 
-  const _Toolbar({required this.onAddPhoto});
+  const _Toolbar({required this.onAddPhoto, required this.onAddText});
 
   @override
   Widget build(BuildContext context) {
@@ -319,7 +335,7 @@ class _Toolbar extends StatelessWidget {
       {'icon': Icons.content_cut, 'label': 'Обрезать', 'action': () {}},
       {'icon': Icons.music_note, 'label': 'Музыка', 'action': () {}},
       {'icon': Icons.auto_fix_high, 'label': 'Эффекты', 'action': () {}},
-      {'icon': Icons.text_fields, 'label': 'Текст', 'action': () {}},
+      {'icon': Icons.text_fields, 'label': 'Текст', 'action': onAddText},
       {'icon': Icons.tune, 'label': 'Фильтры', 'action': () {}},
     ];
 
@@ -361,102 +377,239 @@ class _Toolbar extends StatelessWidget {
 }
 
 // ==========================================
-// C. Таймлайн: компактная полоса
+// C. Таймлайн: непрерывный плейхед (в мс)
 // ==========================================
-class _Timeline extends ConsumerWidget {
+class _Timeline extends ConsumerStatefulWidget {
   final double zoom;
   final ValueChanged<double> onZoomChanged;
 
   const _Timeline({required this.zoom, required this.onZoomChanged});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_Timeline> createState() => _TimelineState();
+}
+
+class _TimelineState extends ConsumerState<_Timeline> {
+  final ScrollController _controller = ScrollController();
+  bool _scrubbing = false;
+
+  static const double _padLeft = 40.0;
+
+  /// Пикселей на миллисекунду (зум влияет на масштаб)
+  double get _pxPerMs => (80 / 3000) * widget.zoom;
+
+  @override
+  void initState() {
+    super.initState();
+    // Перерисовка позиции плейхеда при скролле ленты
+    _controller.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  double _widthOf(PhotoLayer p) => (p.durationMilliseconds * _pxPerMs).clamp(48.0, 400.0);
+
+  /// X-координата момента времени ms в контенте ленты
+  double _xForMs(List<PhotoLayer> photos, double ms) {
+    double x = _padLeft;
+    for (int i = 0; i < photos.length; i++) {
+      final w = _widthOf(photos[i]);
+      final d = photos[i].durationMilliseconds.toDouble();
+      if (ms <= d) {
+        return x + (d > 0 ? (ms / d) * w : 0);
+      }
+      x += w;
+      ms -= d;
+    }
+    return x;
+  }
+
+  /// Мс на пиксель в текущем кадре (для скраббинга)
+  double _msPerPxAt(List<PhotoLayer> photos, double ms) {
+    if (photos.isEmpty) return 0;
+    final idx = frameIndexForMs(photos, ms.round());
+    final p = photos[idx];
+    final w = _widthOf(p);
+    if (w <= 0) return 0;
+    return p.durationMilliseconds / w;
+  }
+
+  /// Лента догоняет плейхед у краёв экрана
+  void _followPlayhead(double xContent, bool active) {
+    if (!active || !_controller.hasClients) return;
+    final vp = _controller.position.viewportDimension;
+    final max = _controller.position.maxScrollExtent;
+    final xs = xContent - _controller.offset;
+    if (xs > vp - 24) {
+      _controller.jumpTo((_controller.offset + (xs - (vp - 24))).clamp(0.0, max));
+    } else if (xs < 24 && _controller.offset > 0) {
+      _controller.jumpTo((_controller.offset + (xs - 24)).clamp(0.0, max));
+    }
+  }
+
+  void _goStart() {
+    ref.read(isPlayingProvider.notifier).state = false;
+    ref.read(playheadMsProvider.notifier).state = 0;
+    if (_controller.hasClients) _controller.jumpTo(0);
+    setState(() {});
+  }
+
+  void _goEnd() {
+    ref.read(isPlayingProvider.notifier).state = false;
+    final photos = ref.read(currentProjectProvider).photos;
+    final total = photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
+    ref.read(playheadMsProvider.notifier).state = total;
+    if (_controller.hasClients) _controller.jumpTo(_controller.position.maxScrollExtent);
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Движение плейхеда: синхронизация индекса кадра + автодогон ленты
+    ref.listen<double>(playheadMsProvider, (prev, ms) {
+      final photos = ref.read(currentProjectProvider).photos;
+      if (photos.isEmpty) return;
+      final idx = frameIndexForMs(photos, ms.round());
+      if (idx != ref.read(selectedPhotoIndexProvider)) {
+        ref.read(selectedPhotoIndexProvider.notifier).state = idx;
+      }
+      _followPlayhead(_xForMs(photos, ms), ref.read(isPlayingProvider) || _scrubbing);
+      setState(() {});
+    });
+
     final project = ref.watch(currentProjectProvider);
     final selectedIndex = ref.watch(selectedPhotoIndexProvider);
+    final playheadMs = ref.watch(playheadMsProvider);
+    final isPlaying = ref.watch(isPlayingProvider);
+    final totalMs = project.photos.fold<int>(0, (sum, p) => sum + p.durationMilliseconds);
+    final offset = _controller.hasClients ? _controller.offset : 0.0;
+    final xScreen = _xForMs(project.photos, playheadMs) - offset;
 
-    return Stack(
+    return Column(
       children: [
-        if (project.photos.isEmpty)
-          Center(
-            child: Text(
-              'Нажмите "Фото", чтобы добавить изображения',
-              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 14),
-            ),
-          )
-        else
-          ReorderableListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
-            itemCount: project.photos.length,
-            onReorder: (oldIndex, newIndex) =>
-                ref.read(currentProjectProvider.notifier).reorderPhotos(oldIndex, newIndex),
-            itemBuilder: (context, index) {
-              final photo = project.photos[index];
-              return _TimelineItem(
-                key: ValueKey('${photo.imagePath}_$index'),
-                photo: photo,
-                isSelected: index == selectedIndex,
-                zoom: zoom,
-                onTap: () {
-                  ref.read(selectedPhotoIndexProvider.notifier).state = index;
-                  showPhotoSettingsSheet(context, ref, index);
-                },
-              );
-            },
-          ),
-
-        // ✅ Короткий плейхед: только по высоте миниатюр
-        if (project.photos.isNotEmpty)
-          Positioned(
-            top: 10,
-            left: 0,
-            right: 0,
-            child: IgnorePointer(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CustomPaint(size: const Size(16, 12), painter: _TrianglePainter(color: AppColors.primary)),
-                    Container(width: 2, height: 96, color: AppColors.primary),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-        // Зум-контрол
-        Positioned(
-          right: 12,
-          bottom: 6,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
-            ),
+        // Строка управления: начало / Play + таймкод / зум / конец
+        SizedBox(
+          height: 32,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.remove, color: AppColors.textMuted, size: 16),
-                SizedBox(
-                  width: 60,
-                  child: SliderTheme(
-                    data: SliderThemeData(
-                      trackHeight: 4,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                      activeTrackColor: AppColors.primary,
-                      inactiveTrackColor: AppColors.surfaceLight,
-                      thumbColor: AppColors.primary,
-                      overlayColor: AppColors.primary.withValues(alpha: 0.2),
+                _EdgeButton(icon: Icons.first_page, onTap: _goStart),
+                Expanded(
+                  child: Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        GestureDetector(
+                          onTap: () => togglePlayback(ref),
+                          child: Container(
+                            width: 34,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              isPlaying ? Icons.pause : Icons.play_arrow,
+                              size: 18,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          '${_fmtMs(playheadMs.round())} / ${_fmtMs(totalMs)}',
+                          style: GoogleFonts.jetBrainsMono(fontSize: 11, color: AppColors.textSecondary),
+                        ),
+                      ],
                     ),
-                    // ✅ Максимум 1.3, чтобы миниатюры не вылезали из полосы
-                    child: Slider(value: zoom, min: 0.8, max: 1.3, onChanged: onZoomChanged),
                   ),
                 ),
-                const Icon(Icons.add, color: AppColors.textMuted, size: 16),
+                _ZoomControl(zoom: widget.zoom, onZoomChanged: widget.onZoomChanged),
+                const SizedBox(width: 8),
+                _EdgeButton(icon: Icons.last_page, onTap: _goEnd),
               ],
             ),
+          ),
+        ),
+
+        // Полоса с кадрами + плейхед (ничего не перекрывает)
+        Expanded(
+          child: Stack(
+            children: [
+              if (project.photos.isEmpty)
+                Center(
+                  child: Text(
+                    'Нажмите "Фото", чтобы добавить изображения',
+                    style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 14),
+                  ),
+                )
+              else
+                ReorderableListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  scrollController: _controller,
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                  itemCount: project.photos.length,
+                  onReorder: (oldIndex, newIndex) =>
+                      ref.read(currentProjectProvider.notifier).reorderPhotos(oldIndex, newIndex),
+                  itemBuilder: (context, index) {
+                    final photo = project.photos[index];
+                    return _TimelineItem(
+                      key: ValueKey('${photo.imagePath}_$index'),
+                      photo: photo,
+                      isSelected: index == selectedIndex,
+                      width: _widthOf(photo),
+                      onTap: () {
+                        ref.read(selectedPhotoIndexProvider.notifier).state = index;
+                        ref.read(playheadMsProvider.notifier).state =
+                            frameStartMs(project.photos, index).toDouble();
+                        showPhotoSettingsSheet(context, ref, index);
+                      },
+                    );
+                  },
+                ),
+
+              // Плейхед: ездит по ленте, цепляем и тянем
+              if (project.photos.isNotEmpty)
+                Positioned(
+                  left: xScreen - 12,
+                  width: 24,
+                  top: 0,
+                  bottom: 0,
+                  child: GestureDetector(
+                    onHorizontalDragStart: (_) => _scrubbing = true,
+                    onHorizontalDragUpdate: (details) {
+                      final photos = ref.read(currentProjectProvider).photos;
+                      if (photos.isEmpty) return;
+                      final ms = ref.read(playheadMsProvider);
+                      final deltaMs = details.delta.dx * _msPerPxAt(photos, ms);
+                      ref.read(playheadMsProvider.notifier).state =
+                          (ms + deltaMs).clamp(0.0, totalMs.toDouble());
+                    },
+                    onHorizontalDragEnd: (_) => _scrubbing = false,
+                    child: Container(
+                      color: Colors.transparent,
+                      child: Column(
+                        children: [
+                          CustomPaint(
+                            size: const Size(16, 12),
+                            painter: _TrianglePainter(color: AppColors.primary),
+                          ),
+                          Expanded(
+                            child: Container(width: 2, color: AppColors.primary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ],
@@ -465,19 +618,100 @@ class _Timeline extends ConsumerWidget {
 }
 
 // ==========================================
-// Миниатюра кадра
+// Кнопка начало/конец
+// ==========================================
+class _EdgeButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _EdgeButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 28,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+        ),
+        child: Icon(icon, size: 18, color: AppColors.primary),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// Компактный зум-контрол (в строке управления)
+// ==========================================
+class _ZoomControl extends StatelessWidget {
+  final double zoom;
+  final ValueChanged<double> onZoomChanged;
+
+  const _ZoomControl({required this.zoom, required this.onZoomChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.remove, color: AppColors.textMuted, size: 14),
+          SizedBox(
+            width: 56,
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                activeTrackColor: AppColors.primary,
+                inactiveTrackColor: AppColors.surfaceLight,
+                thumbColor: AppColors.primary,
+                overlayColor: AppColors.primary.withValues(alpha: 0.2),
+              ),
+              child: Slider(value: zoom, min: 0.8, max: 1.3, onChanged: onZoomChanged),
+            ),
+          ),
+          const Icon(Icons.add, color: AppColors.textMuted, size: 14),
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// Формат времени м:сс
+// ==========================================
+String _fmtMs(int ms) {
+  final d = Duration(milliseconds: ms);
+  final m = d.inMinutes;
+  final s = d.inSeconds % 60;
+  return '$m:${s.toString().padLeft(2, '0')}';
+}
+
+// ==========================================
+// Миниатюра кадра (ширина = длительность)
 // ==========================================
 class _TimelineItem extends StatelessWidget {
   final PhotoLayer photo;
   final bool isSelected;
-  final double zoom;
+  final double width;
   final VoidCallback onTap;
 
   const _TimelineItem({
     super.key,
     required this.photo,
     required this.isSelected,
-    required this.zoom,
+    required this.width,
     required this.onTap,
   });
 
@@ -491,8 +725,8 @@ class _TimelineItem extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 80 * zoom,
-              height: 80 * zoom,
+              width: width,
+              height: 80,
               decoration: BoxDecoration(
                 color: AppColors.surfaceLight,
                 borderRadius: BorderRadius.circular(8),
@@ -640,6 +874,7 @@ void showPhotoSettingsSheet(BuildContext context, WidgetRef ref, int index) {
                         final selected = ref.read(selectedPhotoIndexProvider);
                         if (remaining == 0) {
                           ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+                          ref.read(playheadMsProvider.notifier).state = 0;
                         } else if (selected >= remaining) {
                           ref.read(selectedPhotoIndexProvider.notifier).state = remaining - 1;
                         }
