@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,7 +20,6 @@ class EditorScreen extends ConsumerStatefulWidget {
 
 class _EditorScreenState extends ConsumerState<EditorScreen> {
   double timelineZoom = 1.0;
-  bool isPlaying = false;
 
   /// Сохраняем проект в Hive и выходим
   Future<void> _saveAndPop() async {
@@ -64,31 +65,27 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
             ),
           ],
         ),
+        // ✅ НОВЫЙ UX: превью занимает всё свободное место,
+        // тулбар и таймлайн — компактные фиксированные полосы
         body: SafeArea(
           child: Column(
             children: [
-              // A. Превью (45%)
-              Expanded(
-                flex: 45,
-                child: _PreviewArea(
-                  isPlaying: isPlaying,
-                  onPlayPause: () => setState(() => isPlaying = !isPlaying),
-                ),
-              ),
+              // A. Превью — максимум места
+              const Expanded(child: _PreviewArea()),
               Container(height: 1, color: AppColors.surfaceLight),
 
-              // B. Панель инструментов (15%)
-              Expanded(
-                flex: 15,
+              // B. Панель инструментов — фиксированная высота
+              SizedBox(
+                height: 92,
                 child: _Toolbar(
                   onAddPhoto: () => ref.read(currentProjectProvider.notifier).addPhotosFromGallery(),
                 ),
               ),
               Container(height: 1, color: AppColors.surfaceLight),
 
-              // C. Таймлайн (40%)
-              Expanded(
-                flex: 40,
+              // C. Таймлайн — компактная полоса
+              SizedBox(
+                height: 150,
                 child: _Timeline(
                   zoom: timelineZoom,
                   onZoomChanged: (value) => setState(() => timelineZoom = value),
@@ -103,24 +100,71 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
 }
 
 // ==========================================
-// A. Область превью (честные 9:16)
+// A. Превью: слайд-шоу с переходами
 // ==========================================
-class _PreviewArea extends ConsumerWidget {
-  final bool isPlaying;
-  final VoidCallback onPlayPause;
-
-  const _PreviewArea({required this.isPlaying, required this.onPlayPause});
+class _PreviewArea extends ConsumerStatefulWidget {
+  const _PreviewArea();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_PreviewArea> createState() => _PreviewAreaState();
+}
+
+class _PreviewAreaState extends ConsumerState<_PreviewArea> {
+  Timer? _playTimer;
+  bool _isPlaying = false;
+
+  @override
+  void dispose() {
+    _playTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleNext() {
+    _playTimer?.cancel();
+    final photos = ref.read(currentProjectProvider).photos;
+    if (photos.isEmpty) return;
+    final index = ref.read(selectedPhotoIndexProvider).clamp(0, photos.length - 1);
+    _playTimer = Timer(photos[index].duration, () {
+      if (!mounted) return;
+      final current = ref.read(currentProjectProvider).photos;
+      if (current.isEmpty) return;
+      final cur = ref.read(selectedPhotoIndexProvider);
+      final next = (cur + 1) % current.length;
+      ref.read(selectedPhotoIndexProvider.notifier).state = next;
+      _scheduleNext();
+    });
+  }
+
+  void _togglePlay() {
+    setState(() => _isPlaying = !_isPlaying);
+    if (_isPlaying) {
+      _scheduleNext();
+    } else {
+      _playTimer?.cancel();
+    }
+  }
+
+  void _step(int delta) {
+    final photos = ref.read(currentProjectProvider).photos;
+    if (photos.isEmpty) return;
+    final cur = ref.read(selectedPhotoIndexProvider);
+    final next = (cur + delta).clamp(0, photos.length - 1);
+    ref.read(selectedPhotoIndexProvider.notifier).state = next;
+    if (_isPlaying) _scheduleNext();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final project = ref.watch(currentProjectProvider);
     final selectedIndex = ref.watch(selectedPhotoIndexProvider);
     final hasPhotos = project.photos.isNotEmpty;
     final safeIndex = hasPhotos ? selectedIndex.clamp(0, project.photos.length - 1) : 0;
+    final currentTransition = hasPhotos ? project.photos[safeIndex].transition : TransitionType.none;
 
     return Center(
+      // ✅ Уменьшили отступы, чтобы превью было крупнее
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: AspectRatio(
           aspectRatio: 9 / 16,
           child: Container(
@@ -136,11 +180,23 @@ class _PreviewArea extends ConsumerWidget {
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.file(
-                          File(project.photos[safeIndex].imagePath),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(
-                            child: Icon(Icons.broken_image, color: AppColors.error),
+                        Positioned.fill(
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 450),
+                            switchInCurve: Curves.easeOut,
+                            switchOutCurve: Curves.easeIn,
+                            transitionBuilder: (child, animation) =>
+                                _buildTransition(child, animation, currentTransition),
+                            child: SizedBox.expand(
+                              key: ValueKey('${project.photos[safeIndex].imagePath}_$safeIndex'),
+                              child: Image.file(
+                                File(project.photos[safeIndex].imagePath),
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => const Center(
+                                  child: Icon(Icons.broken_image, color: AppColors.error),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                         Center(
@@ -156,20 +212,20 @@ class _PreviewArea extends ConsumerWidget {
                                 IconButton(
                                   icon: const Icon(Icons.skip_previous, color: Colors.white, size: 28),
                                   disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
-                                  onPressed: safeIndex > 0
-                                      ? () => ref.read(selectedPhotoIndexProvider.notifier).state = safeIndex - 1
-                                      : null,
+                                  onPressed: safeIndex > 0 ? () => _step(-1) : null,
                                 ),
                                 IconButton(
-                                  icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 36),
-                                  onPressed: onPlayPause,
+                                  icon: Icon(
+                                    _isPlaying ? Icons.pause : Icons.play_arrow,
+                                    color: Colors.white,
+                                    size: 36,
+                                  ),
+                                  onPressed: _togglePlay,
                                 ),
                                 IconButton(
                                   icon: const Icon(Icons.skip_next, color: Colors.white, size: 28),
                                   disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
-                                  onPressed: safeIndex < project.photos.length - 1
-                                      ? () => ref.read(selectedPhotoIndexProvider.notifier).state = safeIndex + 1
-                                      : null,
+                                  onPressed: safeIndex < project.photos.length - 1 ? () => _step(1) : null,
                                 ),
                               ],
                             ),
@@ -181,6 +237,69 @@ class _PreviewArea extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ==========================================
+// Построение перехода по типу
+// ==========================================
+Widget _buildTransition(Widget child, Animation<double> animation, TransitionType type) {
+  switch (type) {
+    case TransitionType.none:
+      return child;
+    case TransitionType.fade:
+      return FadeTransition(opacity: animation, child: child);
+    case TransitionType.slideLeft:
+      return SlideTransition(
+        position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero).animate(animation),
+        child: child,
+      );
+    case TransitionType.slideRight:
+      return SlideTransition(
+        position: Tween<Offset>(begin: const Offset(-1, 0), end: Offset.zero).animate(animation),
+        child: child,
+      );
+    case TransitionType.zoomIn:
+      return ScaleTransition(
+        scale: Tween<double>(begin: 0.6, end: 1.0).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+        child: FadeTransition(opacity: animation, child: child),
+      );
+    case TransitionType.zoomOut:
+      return ScaleTransition(
+        scale: Tween<double>(begin: 1.4, end: 1.0).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+        child: FadeTransition(opacity: animation, child: child),
+      );
+    case TransitionType.blur:
+      return _BlurTransition(animation: animation, child: child);
+  }
+}
+
+// ==========================================
+// Блюр-переход
+// ==========================================
+class _BlurTransition extends StatelessWidget {
+  final Animation<double> animation;
+  final Widget child;
+
+  const _BlurTransition({required this.animation, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, c) {
+        final t = animation.value.clamp(0.0, 1.0);
+        final sigma = (1.0 - t) * 12.0;
+        return Opacity(
+          opacity: t,
+          child: ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+            child: c,
+          ),
+        );
+      },
+      child: child,
     );
   }
 }
@@ -242,7 +361,7 @@ class _Toolbar extends StatelessWidget {
 }
 
 // ==========================================
-// C. Таймлайн (drag-and-drop + зум над навигацией)
+// C. Таймлайн: компактная полоса
 // ==========================================
 class _Timeline extends ConsumerWidget {
   final double zoom;
@@ -267,7 +386,7 @@ class _Timeline extends ConsumerWidget {
         else
           ReorderableListView.builder(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
             itemCount: project.photos.length,
             onReorder: (oldIndex, newIndex) =>
                 ref.read(currentProjectProvider.notifier).reorderPhotos(oldIndex, newIndex),
@@ -286,26 +405,31 @@ class _Timeline extends ConsumerWidget {
             },
           ),
 
-        // Плейхед по центру
+        // ✅ Короткий плейхед: только по высоте миниатюр
         if (project.photos.isNotEmpty)
-          IgnorePointer(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CustomPaint(size: const Size(16, 12), painter: _TrianglePainter(color: AppColors.primary)),
-                  Container(width: 2, height: 110, color: AppColors.primary),
-                ],
+          Positioned(
+            top: 10,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CustomPaint(size: const Size(16, 12), painter: _TrianglePainter(color: AppColors.primary)),
+                    Container(width: 2, height: 96, color: AppColors.primary),
+                  ],
+                ),
               ),
             ),
           ),
 
-        // Зум-контрол (внутри SafeArea, над системной навигацией)
+        // Зум-контрол
         Positioned(
           right: 12,
-          bottom: 8,
+          bottom: 6,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(20),
@@ -326,7 +450,8 @@ class _Timeline extends ConsumerWidget {
                       thumbColor: AppColors.primary,
                       overlayColor: AppColors.primary.withValues(alpha: 0.2),
                     ),
-                    child: Slider(value: zoom, min: 0.8, max: 1.5, onChanged: onZoomChanged),
+                    // ✅ Максимум 1.3, чтобы миниатюры не вылезали из полосы
+                    child: Slider(value: zoom, min: 0.8, max: 1.3, onChanged: onZoomChanged),
                   ),
                 ),
                 const Icon(Icons.add, color: AppColors.textMuted, size: 16),
@@ -340,7 +465,7 @@ class _Timeline extends ConsumerWidget {
 }
 
 // ==========================================
-// Миниатюра кадра на таймлайне
+// Миниатюра кадра
 // ==========================================
 class _TimelineItem extends StatelessWidget {
   final PhotoLayer photo;
@@ -401,112 +526,162 @@ class _TimelineItem extends StatelessWidget {
 }
 
 // ==========================================
-// Bottom sheet: длительность + удаление кадра
+// Bottom sheet: длительность + переход + удаление
 // ==========================================
 void showPhotoSettingsSheet(BuildContext context, WidgetRef ref, int index) {
   showModalBottomSheet(
     context: context,
     backgroundColor: AppColors.surface,
-    useSafeArea: true,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
     builder: (sheetContext) {
-      // Двойная защита: если SafeArea не сработал,
-      // добавляем высоту системной панели вручную
       final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
 
-      return StatefulBuilder(
-        builder: (sheetContext, setSheetState) {
-          final current = ref.read(currentProjectProvider);
-          if (index >= current.photos.length) return const SizedBox.shrink();
-          final ms = current.photos[index].durationMilliseconds;
+      return SafeArea(
+        top: false,
+        minimum: EdgeInsets.only(bottom: systemBottomInset),
+        child: StatefulBuilder(
+          builder: (sheetContext, setSheetState) {
+            final current = ref.read(currentProjectProvider);
+            if (index >= current.photos.length) return const SizedBox.shrink();
+            final photo = current.photos[index];
+            final ms = photo.durationMilliseconds;
 
-          return Padding(
-            padding: EdgeInsets.fromLTRB(20, 24, 20, 24 + systemBottomInset),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Ручка для перетаскивания панели
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(2),
+            return SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
-                Text(
-                  'Настройки кадра ${index + 1}',
-                  style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Длительность', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textSecondary)),
-                    Text(
-                      '${(ms / 1000).toStringAsFixed(1)} сек',
-                      style: GoogleFonts.jetBrainsMono(fontSize: 14, color: AppColors.primary),
+                  Text(
+                    'Настройки кадра ${index + 1}',
+                    style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Длительность', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textSecondary)),
+                      Text(
+                        '${(ms / 1000).toStringAsFixed(1)} сек',
+                        style: GoogleFonts.jetBrainsMono(fontSize: 14, color: AppColors.primary),
+                      ),
+                    ],
+                  ),
+                  SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 4,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                      activeTrackColor: AppColors.primary,
+                      inactiveTrackColor: AppColors.surfaceLight,
+                      thumbColor: AppColors.primary,
+                      overlayColor: AppColors.primary.withValues(alpha: 0.2),
                     ),
-                  ],
-                ),
-                SliderTheme(
-                  data: SliderThemeData(
-                    trackHeight: 4,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
-                    activeTrackColor: AppColors.primary,
-                    inactiveTrackColor: AppColors.surfaceLight,
-                    thumbColor: AppColors.primary,
-                    overlayColor: AppColors.primary.withValues(alpha: 0.2),
-                  ),
-                  child: Slider(
-                    value: (ms / 1000).clamp(1.0, 5.0),
-                    min: 1.0,
-                    max: 5.0,
-                    divisions: 8,
-                    onChanged: (value) {
-                      ref.read(currentProjectProvider.notifier).updatePhotoDuration(index, (value * 1000).round());
-                      setSheetState(() {});
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      ref.read(currentProjectProvider.notifier).removePhoto(index);
-                      final remaining = ref.read(currentProjectProvider).photos.length;
-                      final selected = ref.read(selectedPhotoIndexProvider);
-                      if (remaining == 0) {
-                        ref.read(selectedPhotoIndexProvider.notifier).state = 0;
-                      } else if (selected >= remaining) {
-                        ref.read(selectedPhotoIndexProvider.notifier).state = remaining - 1;
-                      }
-                      Navigator.pop(sheetContext);
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      side: const BorderSide(color: AppColors.error),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Slider(
+                      value: (ms / 1000).clamp(1.0, 5.0),
+                      min: 1.0,
+                      max: 5.0,
+                      divisions: 8,
+                      onChanged: (value) {
+                        ref.read(currentProjectProvider.notifier).updatePhotoDuration(index, (value * 1000).round());
+                        setSheetState(() {});
+                      },
                     ),
-                    icon: const Icon(Icons.delete_outline),
-                    label: Text('Удалить кадр', style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600)),
                   ),
-                ),
-              ],
-            ),
-          );
-        },
+                  const SizedBox(height: 16),
+                  Text('Переход', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textSecondary)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: TransitionType.values.map((type) {
+                      final isSelected = photo.transition == type;
+                      return ChoiceChip(
+                        label: Text(_transitionLabel(type)),
+                        selected: isSelected,
+                        onSelected: (_) {
+                          ref.read(currentProjectProvider.notifier).updatePhotoTransition(index, type);
+                          setSheetState(() {});
+                        },
+                        selectedColor: AppColors.primary,
+                        backgroundColor: AppColors.surfaceLight,
+                        labelStyle: GoogleFonts.manrope(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isSelected ? Colors.white : AppColors.textSecondary,
+                        ),
+                        side: BorderSide(
+                          color: isSelected ? AppColors.primary : AppColors.primary.withValues(alpha: 0.3),
+                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        ref.read(currentProjectProvider.notifier).removePhoto(index);
+                        final remaining = ref.read(currentProjectProvider).photos.length;
+                        final selected = ref.read(selectedPhotoIndexProvider);
+                        if (remaining == 0) {
+                          ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+                        } else if (selected >= remaining) {
+                          ref.read(selectedPhotoIndexProvider.notifier).state = remaining - 1;
+                        }
+                        Navigator.pop(sheetContext);
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.error,
+                        side: const BorderSide(color: AppColors.error),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      icon: const Icon(Icons.delete_outline),
+                      label: Text('Удалить кадр', style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       );
     },
   );
+}
+
+/// Подписи переходов на русском
+String _transitionLabel(TransitionType type) {
+  switch (type) {
+    case TransitionType.none:
+      return 'Нет';
+    case TransitionType.fade:
+      return 'Фейд';
+    case TransitionType.slideLeft:
+      return 'Слайд ←';
+    case TransitionType.slideRight:
+      return 'Слайд →';
+    case TransitionType.zoomIn:
+      return 'Зум +';
+    case TransitionType.zoomOut:
+      return 'Зум −';
+    case TransitionType.blur:
+      return 'Блюр';
+  }
 }
 
 // ==========================================

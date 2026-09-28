@@ -64,6 +64,22 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     state = _copyWithPhotos(updated);
   }
 
+  /// Изменение перехода кадра
+  void updatePhotoTransition(int index, TransitionType transition) {
+    if (index < 0 || index >= state.photos.length) return;
+    final old = state.photos[index];
+    final updated = List<PhotoLayer>.from(state.photos);
+    updated[index] = PhotoLayer(
+      imagePath: old.imagePath,
+      durationMilliseconds: old.durationMilliseconds,
+      transition: transition,
+      scale: old.scale,
+      positionX: old.positionX,
+      positionY: old.positionY,
+    );
+    state = _copyWithPhotos(updated);
+  }
+
   /// Изменение порядка фото (drag-and-drop)
   void reorderPhotos(int oldIndex, int newIndex) {
     if (newIndex > oldIndex) newIndex -= 1;
