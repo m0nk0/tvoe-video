@@ -1,0 +1,624 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+import '../../core/theme/colors.dart';
+import '../../data/models/video_project.dart';
+import '../../data/providers/project_provider.dart';
+import '../../data/providers/projects_provider.dart';
+import '../editor/editor_screen.dart';
+import '../media_library/media_library_screen.dart';
+import '../templates/templates_screen.dart';
+
+class HomeScreen extends ConsumerWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final projects = ref.watch(projectsProvider);
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        title: Text(
+          'Твоё Видео',
+          style: GoogleFonts.unbounded(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => _openMediaLibrary(context, ref),
+            child: Text(
+              'Медиатека',
+              style: GoogleFonts.manrope(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('Мои проекты',
+                    style: Theme.of(context).textTheme.headlineLarge),
+                if (projects.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: AppColors.primary.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      '${projects.length}',
+                      style: GoogleFonts.jetBrainsMono(
+                          fontSize: 12, color: AppColors.primary),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: projects.isEmpty
+                  ? const _EmptyState()
+                  : GridView.builder(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                        childAspectRatio: 0.8,
+                      ),
+                      itemCount: projects.length,
+                      itemBuilder: (context, index) {
+                        return _ProjectCard(project: projects[index]);
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showCreateOptions(context, ref),
+        backgroundColor: AppColors.primary,
+        elevation: 4,
+        icon: const Icon(Icons.add, size: 24, color: Colors.white),
+        label: Text(
+          'Создать',
+          style: GoogleFonts.manrope(
+              fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+        ),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+    );
+  }
+
+  // ✅ Отдельный метод для открытия медиатеки
+  void _openMediaLibrary(BuildContext context, WidgetRef ref) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MediaLibraryScreen(
+          onUseMusic: (track) {
+            print(' HOME: Выбрана музыка');
+            _createProjectWithMusic(context, ref, track);
+          },
+          onUsePhotos: (paths) {
+            print('🏠 HOME: Выбраны фото: ${paths.length} шт.');
+            _createProjectWithPhotos(context, ref, paths);
+          },
+        ),
+      ),
+    );
+  }
+
+  // ✅ Создание проекта с музыкой
+  Future<void> _createProjectWithMusic(
+      BuildContext context, WidgetRef ref, dynamic track) async {
+    print('🏠 HOME: Создаю проект с музыкой');
+    
+    final notifier = ref.read(currentProjectProvider.notifier);
+    notifier.clearProject();
+    notifier.setAudioTrack(track);
+    
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    final project = ref.read(currentProjectProvider);
+    await ref.read(projectRepositoryProvider).saveProject(project);
+    ref.read(projectsProvider.notifier).refresh();
+    
+    print('🏠 HOME: Проект сохранен, открываю редактор');
+    
+    if (context.mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const EditorScreen()),
+      );
+    }
+  }
+
+  // ✅ Создание проекта с фото
+  Future<void> _createProjectWithPhotos(
+      BuildContext context, WidgetRef ref, List<String> paths) async {
+    print(' HOME: Создаю проект с ${paths.length} фото');
+    
+    final notifier = ref.read(currentProjectProvider.notifier);
+    notifier.clearProject();
+    
+    for (final path in paths) {
+      notifier.addPhotoByPath(path);
+    }
+    
+    await Future.delayed(const Duration(milliseconds: 100));
+    
+    final project = ref.read(currentProjectProvider);
+    print('🏠 HOME: В проекте ${project.photos.length} фото');
+    
+    await ref.read(projectRepositoryProvider).saveProject(project);
+    ref.read(projectsProvider.notifier).refresh();
+    
+    print('🏠 HOME: Проект сохранен, открываю редактор');
+    
+    if (context.mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const EditorScreen()),
+      );
+    }
+  }
+
+  void _showCreateOptions(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
+        return SafeArea(
+          top: false,
+          minimum: EdgeInsets.only(bottom: systemBottomInset),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Text(
+                  'Новый проект',
+                  style: GoogleFonts.unbounded(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Выберите, как начать работу',
+                  style: GoogleFonts.manrope(
+                      fontSize: 14, color: AppColors.textMuted),
+                ),
+                const SizedBox(height: 20),
+                _OptionTile(
+                  icon: Icons.add_photo_alternate,
+                  title: 'Пустой проект',
+                  subtitle: 'Начните с нуля — добавьте фото и настройте вручную',
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    ref.read(currentProjectProvider.notifier).clearProject();
+                    ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const EditorScreen()),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                _OptionTile(
+                  icon: Icons.auto_awesome,
+                  title: 'Из шаблона',
+                  subtitle: 'Быстрый старт с готовыми настройками',
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const TemplatesScreen()),
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                _OptionTile(
+                  icon: Icons.video_library_outlined,
+                  title: 'Из медиатеки',
+                  subtitle: 'Выберите фото из библиотеки для нового проекта',
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _openMediaLibrary(context, ref);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ==========================================
+// Пустое состояние
+// ==========================================
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.movie_creation_outlined,
+              size: 64,
+              color: AppColors.textMuted.withValues(alpha: 0.5)),
+          const SizedBox(height: 16),
+          Text(
+            'Пока нет проектов',
+            style: GoogleFonts.unbounded(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              'Нажмите "Создать", чтобы собрать своё первое видео',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.manrope(
+                  fontSize: 14, color: AppColors.textMuted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// Карточка проекта
+// ==========================================
+class _ProjectCard extends ConsumerWidget {
+  final VideoProject project;
+
+  const _ProjectCard({required this.project});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return GestureDetector(
+      onTap: () {
+        ref.read(currentProjectProvider.notifier).loadProject(project);
+        ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const EditorScreen()),
+        );
+      },
+      onLongPress: () => _showProjectMenu(context, ref),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.2), width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: project.photos.isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.file(
+                          File(project.photos.first.imagePath),
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          errorBuilder: (_, __, ___) => const Icon(
+                              Icons.broken_image,
+                              color: AppColors.textMuted),
+                        ),
+                      )
+                    : const Center(
+                        child: Icon(Icons.image,
+                            size: 40, color: AppColors.textMuted)),
+              ),
+            ),
+            Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    project.name,
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(_formatDate(project.createdAt),
+                          style: Theme.of(context).textTheme.labelSmall),
+                      Text(
+                        project.formattedDuration,
+                        style: GoogleFonts.jetBrainsMono(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.primary),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    const months = [
+      'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
+      'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'
+    ];
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
+
+  void _showProjectMenu(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
+        return SafeArea(
+          top: false,
+          minimum: EdgeInsets.only(bottom: systemBottomInset),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined,
+                      color: AppColors.textPrimary),
+                  title: Text('Переименовать',
+                      style: GoogleFonts.manrope(
+                          fontSize: 16, color: AppColors.textPrimary)),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showRenameDialog(context, ref);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline,
+                      color: AppColors.error),
+                  title: Text('Удалить',
+                      style: GoogleFonts.manrope(
+                          fontSize: 16, color: AppColors.error)),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showDeleteDialog(context, ref);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showRenameDialog(BuildContext context, WidgetRef ref) {
+    final controller = TextEditingController(text: project.name);
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Переименовать',
+          style: GoogleFonts.unbounded(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary),
+        ),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: AppColors.textPrimary),
+          decoration: InputDecoration(
+            hintText: 'Название проекта',
+            hintStyle: TextStyle(
+                color: AppColors.textMuted.withValues(alpha: 0.6)),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.4))),
+            focusedBorder: const UnderlineInputBorder(
+                borderSide: BorderSide(color: AppColors.primary)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Отмена',
+                style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty) {
+                ref
+                    .read(projectsProvider.notifier)
+                    .rename(project.id, newName);
+              }
+              Navigator.pop(dialogContext);
+            },
+            child: Text('Сохранить',
+                style: GoogleFonts.manrope(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteDialog(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Удалить проект?',
+          style: GoogleFonts.unbounded(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary),
+        ),
+        content: Text(
+          '"${project.name}" будет удалён безвозвратно.',
+          style: GoogleFonts.manrope(
+              fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Отмена',
+                style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              ref.read(projectsProvider.notifier).delete(project.id);
+              Navigator.pop(dialogContext);
+            },
+            child: Text('Удалить',
+                style: GoogleFonts.manrope(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// Плитка опций
+// ==========================================
+class _OptionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _OptionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(16),
+          border:
+              Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: AppColors.primary.withValues(alpha: 0.3)),
+              ),
+              child: Icon(icon, color: AppColors.primary, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.unbounded(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.manrope(
+                        fontSize: 13, color: AppColors.textMuted, height: 1.3),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right,
+                color: AppColors.textMuted, size: 24),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,66 @@
+name: tvoe_video
+description: ReelMaker - создание видео из фото (Мир 5 вселенной Твой Magazine)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # FFmpeg для микширования видео и музыки
+  ffmpeg_kit_flutter_new_min: ^3.6.0
+
+  # Воспроизведение видео в медиатеке
+  video_player: ^2.8.3
+
+  # Открытие системного файлового менеджера
+  android_intent_plus: ^5.0.2
+
+  # State Management
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+
+  # Local Storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Video & Media
+  image_picker: ^1.0.7
+  path_provider: ^2.1.2
+  flutter_quick_video_encoder: ^1.7.2
+  gal: ^2.3.0
+  share_plus: ^7.2.1
+
+  # Аудио (для музыки в видео)
+  file_picker: ^8.1.2
+  just_audio: ^0.9.36
+  audio_video_progress_bar: ^2.0.2
+
+  # UI & Icons
+  google_fonts: ^6.1.0
+
+  # Utilities
+  uuid: ^4.3.3
+  intl: ^0.19.0
+  permission_handler: ^11.3.0
+  google_mlkit_face_detection: ^0.15.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+  # Code Generation
+  build_runner: ^2.4.8
+  riverpod_generator: ^2.3.9
+  hive_generator: ^2.0.1
+
+flutter:
+  uses-material-design: true
+
+  # ✅ Assets приложения (встроенная музыка)
+  assets:
+    - assets/music/
