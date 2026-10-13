@@ -72,9 +72,20 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     setState(() => _selectedPhotoPaths.clear());
   }
 
-  void _createProjectFromSelected() {
-    if (_selectedPhotoPaths.isEmpty || widget.onUsePhotos == null) return;
-    widget.onUsePhotos!(_selectedPhotoPaths.toList());
+    void _createProjectFromSelected() {
+    print('📚 MEDIA_LIBRARY: Создаю проект из ${_selectedPhotoPaths.length} выбранных фото');
+    
+    if (_selectedPhotoPaths.isEmpty || widget.onUsePhotos == null) {
+      print('⚠️ MEDIA_LIBRARY: Прервано (нет выбранных фото или колбэка)');
+      return;
+    }
+    
+    final paths = _selectedPhotoPaths.toList();
+    
+    // 1. Сначала передаем данные наверх (в HomeScreen)
+    widget.onUsePhotos!(paths);
+    
+    // 2. Затем закрываем медиатеку
     Navigator.pop(context);
   }
 

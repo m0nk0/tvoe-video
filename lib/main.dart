@@ -20,28 +20,32 @@ void main() async {
   // Инициализация Hive
   await Hive.initFlutter();
 
-  // Регистрация адаптеров моделей
-  Hive.registerAdapter(VideoProjectAdapter());
-  Hive.registerAdapter(PhotoLayerAdapter());
-  Hive.registerAdapter(TextLayerAdapter());
-  Hive.registerAdapter(TemplateAdapter());
-  Hive.registerAdapter(TransitionTypeAdapter());
-  Hive.registerAdapter(AnimationTypeAdapter());
-  Hive.registerAdapter(AudioTrackAdapter());
-  Hive.registerAdapter(FilterTypeAdapter());
-  Hive.registerAdapter(EntranceAnimationAdapter()); // ✅ ДОБАВИТЬ
-  Hive.registerAdapter(FitModeAdapter());        // ✅ ДОБАВИТЬ
-  Hive.registerAdapter(BackgroundTypeAdapter()); // ✅ ДОБАВИТЬ
-  
+  // Регистрация адаптеров моделей (строго по typeId из твоих файлов)
+  Hive.registerAdapter(VideoProjectAdapter());       // typeId: 1
+  Hive.registerAdapter(TransitionTypeAdapter());     // typeId: 2
+  Hive.registerAdapter(PhotoLayerAdapter());         // typeId: 3
+  Hive.registerAdapter(TextLayerAdapter());          // typeId: 4
+  Hive.registerAdapter(AnimationTypeAdapter());      // typeId: 5
+  Hive.registerAdapter(TemplateAdapter());           // typeId: 6
+  Hive.registerAdapter(AudioTrackAdapter());         // typeId: 7
+  Hive.registerAdapter(FilterTypeAdapter());         // typeId: 8
+  Hive.registerAdapter(EntranceAnimationAdapter());  // typeId: 9
+  Hive.registerAdapter(FitModeAdapter());            // typeId: 10
+  Hive.registerAdapter(BackgroundTypeAdapter());     // typeId: 11
+  Hive.registerAdapter(OverlayTypeAdapter());        // typeId: 12 (Именно он вызывал ошибку ранее)
+  Hive.registerAdapter(LiveMotionAdapter());         // typeId: 13
+
+  // ❌ VideoFormatAdapter() УДАЛЕН, так как VideoFormat не является Hive-типом (@HiveType)
+
   // Инициализация репозитория проектов
   final projectRepo = ProjectRepository();
   await projectRepo.init();
 
-    // ✅ Инициализация хранилища медиа (папки clips/ и music/)
+  // ✅ Инициализация хранилища медиа (папки clips/ и music/)
   final mediaStorage = MediaStorageService();
   await mediaStorage.init();
 
-  // ✅ Инициализация встроенной музыки (копируем 8 треков из assets)
+  // ✅ Инициализация встроенной музыки (копируем треки из assets)
   final bundledMusic = BundledMusicService(mediaStorage);
   await bundledMusic.initialize();
 
