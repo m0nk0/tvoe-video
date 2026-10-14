@@ -1,12 +1,11 @@
 plugins {
     id("com.android.application")
-    // ✅ УДАЛЕНО: id("kotlin-android") — Flutter теперь использует Built-in Kotlin
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
     namespace = "com.tvoymagazine.tvoe_video"
-    compileSdk = 36
+    compileSdk = 34
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -20,16 +19,22 @@ android {
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // 👇 Оставляем только современные 64-битные процессоры
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
         release {
+            isMinifyEnabled = false
+            isShrinkResources = false
             signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
 
-// ✅ Оставлено: настройка JVM target для Kotlin (работает с Built-in Kotlin)
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)

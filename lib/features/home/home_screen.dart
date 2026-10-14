@@ -115,8 +115,8 @@ class HomeScreen extends ConsumerWidget {
           },
           onUsePhotos: (paths) {
             print('🏠 HOME: Получены фото (${paths.length} шт.), закрываю медиатеку');
-            Navigator.pop(context); // Сначала закрываем медиатеку
-            _createProjectWithPhotos(context, ref, paths); // Потом создаем проект
+            Navigator.pop(context);
+            _createProjectWithPhotos(context, ref, paths);
           },
         ),
       ),
@@ -137,7 +137,7 @@ class HomeScreen extends ConsumerWidget {
       ref.read(projectsProvider.notifier).refresh();
       
       if (context.mounted) {
-        Navigator.push(context, MaterialPageRoute(builder: (_) => const EditorScreen()));
+        Navigator.push(context, MaterialPageRoute(builder: (_) => EditorScreen()));
       }
     } catch (e, st) {
       print('❌ ОШИБКА создания проекта с музыкой: $e');
@@ -161,7 +161,6 @@ class HomeScreen extends ConsumerWidget {
         notifier.addPhotoByPath(path);
       }
 
-      // Даем Riverpod мгновение на обновление стейта
       await Future.delayed(const Duration(milliseconds: 100));
 
       final project = ref.read(currentProjectProvider);
@@ -176,7 +175,7 @@ class HomeScreen extends ConsumerWidget {
       if (context.mounted) {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const EditorScreen()),
+          MaterialPageRoute(builder: (_) => EditorScreen()),
         );
       }
     } catch (e, st) {
@@ -229,7 +228,7 @@ class HomeScreen extends ConsumerWidget {
                     Navigator.pop(sheetContext);
                     ref.read(currentProjectProvider.notifier).clearProject();
                     ref.read(selectedPhotoIndexProvider.notifier).state = 0;
-                    Navigator.push(context, MaterialPageRoute(builder: (context) => const EditorScreen()));
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => EditorScreen()));
                   },
                 ),
                 const SizedBox(height: 12),
@@ -293,7 +292,7 @@ class _ProjectCard extends ConsumerWidget {
       onTap: () {
         ref.read(currentProjectProvider.notifier).loadProject(project);
         ref.read(selectedPhotoIndexProvider.notifier).state = 0;
-        Navigator.push(context, MaterialPageRoute(builder: (context) => const EditorScreen()));
+        Navigator.push(context, MaterialPageRoute(builder: (context) => EditorScreen()));
       },
       onLongPress: () => _showProjectMenu(context, ref),
       child: Container(

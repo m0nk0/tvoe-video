@@ -8,7 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/colors.dart';
-import '../../core/utils/project_harmonizer.dart'; // 🆕 AI Гармонизация
+import '../../core/utils/project_harmonizer.dart';
 import '../../data/models/video_format.dart';
 import '../../data/providers/audio_provider.dart';
 import '../../data/providers/project_provider.dart';
@@ -27,7 +27,7 @@ import 'sheets/transitions_sheet.dart';
 import 'text_tools.dart';
 import 'widgets/preview_area.dart';
 import 'widgets/timeline.dart';
-import 'widgets/toolbar.dart';
+import 'widgets/radial_tool_menu.dart';
 
 class EditorScreen extends ConsumerStatefulWidget {
   const EditorScreen({super.key});
@@ -53,8 +53,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     _tick?.cancel();
     _tick = Timer.periodic(const Duration(milliseconds: 33), (_) {
       final photos = ref.read(currentProjectProvider).photos;
-      final total =
-          photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
+      final total = photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
       if (total <= 0) return;
       double ms = ref.read(playheadMsProvider) + 33;
       if (ms >= total) {
@@ -65,24 +64,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     });
   }
 
-  // ==========================================
-  // 🔊 Аудио: единый глобальный плеер
-  // ==========================================
   Future<void> _ensureTrackLoaded() async {
     final track = ref.read(currentProjectProvider).audioTrack;
     final player = ref.read(audioPlayerProvider);
-
     if (track == null) {
       await player.stop();
       return;
     }
-
     if (!isPlayerLoadedWith(player, track.filePath)) {
       try {
         await player.setFilePath(track.filePath);
         await player.setVolume(track.volume);
       } catch (e) {
-        print('⚠️ Не удалось загрузить трек для превью: $e');
+        print('⚠️ Не удалось загрузить трек: $e');
       }
     }
   }
@@ -92,10 +86,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     if (track == null) return;
     final player = ref.read(audioPlayerProvider);
     if (!isPlayerLoadedWith(player, track.filePath)) return;
-
     final playheadMs = ref.read(playheadMsProvider);
     final posMs = playheadMs - track.startTime * 1000;
-
     try {
       if (posMs < 0) {
         await player.pause();
@@ -109,23 +101,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   Future<void> _startAudio() async {
     final track = ref.read(currentProjectProvider).audioTrack;
     if (track == null) return;
-
     await _ensureTrackLoaded();
     final player = ref.read(audioPlayerProvider);
     if (!isPlayerLoadedWith(player, track.filePath)) return;
-
     final playheadMs = ref.read(playheadMsProvider);
     final audioStartMs = track.startTime * 1000;
     if (playheadMs < audioStartMs) return;
-
     try {
       await player.setVolume(track.volume);
-      await player.seek(
-          Duration(milliseconds: (playheadMs - audioStartMs).round()));
+      await player.seek(Duration(milliseconds: (playheadMs - audioStartMs).round()));
       await player.play();
       ref.read(isAudioPlayingProvider.notifier).state = true;
     } catch (e) {
-      print('⚠️ Ошибка запуска аудио: $e');
+      print('️ Ошибка запуска аудио: $e');
     }
   }
 
@@ -136,23 +124,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     } catch (_) {}
   }
 
-  // ==========================================
-  //  Сохранение проекта
-  // ==========================================
   Future<void> _saveProject({bool showSnackBar = false}) async {
     final project = ref.read(currentProjectProvider);
-    final hasContent = project.photos.isNotEmpty ||
-        project.texts.isNotEmpty ||
-        project.audioTrack != null;
+    final hasContent = project.photos.isNotEmpty || project.texts.isNotEmpty || project.audioTrack != null;
 
     if (!hasContent) {
       if (showSnackBar && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Нечего сохранять: добавьте фото, текст или музыку'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 2),
-          ),
+          const SnackBar(content: Text('Нечего сохранять: добавьте фото, текст или музыку'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)),
         );
       }
       return;
@@ -161,34 +140,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     try {
       await ref.read(projectRepositoryProvider).saveProject(project);
       ref.read(projectsProvider.notifier).refresh();
-      print(
-          '✅ ПРОЕКТ СОХРАНЁН: ${project.name} | фото: ${project.photos.length}');
-
       if (showSnackBar && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white, size: 20),
-                SizedBox(width: 8),
-                Expanded(child: Text('Проект сохранён')),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 1),
-          ),
+          const SnackBar(content: Text('Проект сохранён'), backgroundColor: Colors.green, duration: Duration(seconds: 1)),
         );
       }
     } catch (e, st) {
-      print('❌ ОШИБКА СОХРАНЕНИЯ: $e');
-      print(st);
+      print('❌ ОШИБКА СОХРАНЕНИЯ: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка сохранения: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 2),
-          ),
+          SnackBar(content: Text('Ошибка сохранения: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
         );
       }
     }
@@ -201,17 +162,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  // ==========================================
-  //  📷 Шторка выбора источника фото (Галерея / Медиатека)
-  // ==========================================
   void _showPhotoSourceSheet() {
     _pauseAudio();
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sheetCtx) {
         return SafeArea(
           child: Padding(
@@ -220,25 +176,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Text(
-                  'Добавить фото',
-                  style: GoogleFonts.unbounded(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
+                Center(child: Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(2)))),
+                Text('Добавить фото', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                 const SizedBox(height: 20),
                 _SourceTile(
                   icon: Icons.photo_library,
@@ -246,9 +185,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
                   subtitle: 'Выбрать из галереи устройства',
                   onTap: () {
                     Navigator.pop(sheetCtx);
-                    ref
-                        .read(currentProjectProvider.notifier)
-                        .addPhotosFromGallery();
+                    ref.read(currentProjectProvider.notifier).addPhotosFromGallery();
                   },
                 ),
                 const SizedBox(height: 12),
@@ -269,9 +206,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     );
   }
 
-  // ==========================================
-  // 📷 Открытие медиатеки для выбора фото (мульти-режим)
-  // ==========================================
   void _openMediaLibraryForPhotos() {
     _pauseAudio();
     _mediaLibraryOpen = true;
@@ -281,11 +215,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         builder: (_) => MediaLibraryScreen(
           singleSelectMode: false,
           onUsePhotos: (paths) {
-            print('🎬 EDITOR: Добавляю ${paths.length} фото из медиатеки');
             final notifier = ref.read(currentProjectProvider.notifier);
-            for (final path in paths) {
-              notifier.addPhotoByPath(path);
-            }
+            for (final path in paths) notifier.addPhotoByPath(path);
           },
         ),
       ),
@@ -299,9 +230,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     });
   }
 
-  // ==========================================
-  // 🎬 Открытие медиатеки (для добавления музыки)
-  // ==========================================
   void _openMediaLibrary() {
     _pauseAudio();
     _mediaLibraryOpen = true;
@@ -311,15 +239,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
         builder: (_) => MediaLibraryScreen(
           singleSelectMode: true,
           onUseMusic: (track) {
-            print('🎬 EDITOR: Добавляю музыку в проект');
             ref.read(currentProjectProvider.notifier).setAudioTrack(track);
           },
           onUsePhotos: (paths) {
-            print('🎬 EDITOR: Добавляю ${paths.length} фото в проект');
             final notifier = ref.read(currentProjectProvider.notifier);
-            for (final path in paths) {
-              notifier.addPhotoByPath(path);
-            }
+            for (final path in paths) notifier.addPhotoByPath(path);
           },
         ),
       ),
@@ -333,126 +257,61 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     });
   }
 
-  // ==========================================
-  // ✂️ Кроп-редактор
-  // ==========================================
   void _openCropEditor() {
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CropEditorScreen(photoIndex: selectedIndex),
-        ),
-      );
+      Navigator.push(context, MaterialPageRoute(builder: (_) => CropEditorScreen(photoIndex: selectedIndex)));
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Сначала добавьте фото на таймлайн'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 2),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
     }
   }
 
-  // ==========================================
-  // 🎨 Эффекты (мультивыбор)
-  // ==========================================
   void _openEffects() {
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
-      final targets = SelectionController(ref).targetIndices(selectedIndex);
-      showEffectsSheet(context, ref, targets);
+      showEffectsSheet(context, ref, SelectionController(ref).targetIndices(selectedIndex));
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Сначала добавьте фото на таймлайн'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 2),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
     }
   }
 
-  // ==========================================
-  // 🔄 Переходы (мультивыбор)
-  // ==========================================
   void _openTransitions() {
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
-      final targets = SelectionController(ref).targetIndices(selectedIndex);
-      showTransitionsSheet(context, ref, targets);
+      showTransitionsSheet(context, ref, SelectionController(ref).targetIndices(selectedIndex));
     } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Сначала добавьте фото на таймлайн'),
-          backgroundColor: Colors.orange,
-          duration: Duration(seconds: 2),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
     }
   }
 
-  // ==========================================
-  //  Оверлеи (стиль плёнки)
-  // ==========================================
   void _openOverlays() {
     showOverlaysSheet(context, ref);
   }
 
-  // ==========================================
-  //  Живые фото (Ken Burns)
-  // ==========================================
   void _openLiveMotion() {
     showLiveMotionSheet(context, ref);
   }
 
-  // ==========================================
-  //  AI Гармонизация всего проекта
-  // ==========================================
   void _openHarmonize() {
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Сначала добавьте фото на таймлайн'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
       return;
     }
-
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: const Row(
-          children: [
-            Icon(Icons.auto_awesome, color: Colors.yellowAccent),
-            SizedBox(width: 8),
-            Text('✨ AI Улучшение'),
-          ],
-        ),
-        content: Text(
-          'Приложение автоматически проанализирует все фото, выберет лучшее как эталон и выровняет цвета, яркость и контраст остальных кадров под него.\n\nЭто сделает ваш ролик профессиональным и цельным.',
-          style: GoogleFonts.manrope(fontSize: 14),
-        ),
+        title: const Row(children: [Icon(Icons.auto_awesome, color: Colors.yellowAccent), SizedBox(width: 8), Text('✨ AI Улучшение')]),
+        content: Text('Приложение автоматически выровняет цвета, яркость и контраст всех кадров под лучший.', style: GoogleFonts.manrope(fontSize: 14)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Отмена'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
           TextButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              
               if (mounted) {
                 showDialog(
                   context: context,
@@ -462,56 +321,23 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
                       color: AppColors.surface,
                       child: Padding(
                         padding: EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 16),
-                            Text('Анализируем и улучшаем фото...'),
-                          ],
-                        ),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(), SizedBox(height: 16), Text('Анализируем...')]),
                       ),
                     ),
                   ),
                 );
               }
-
               try {
-                final matrices = await ProjectHarmonizer.harmonizeProject(
-                  photos,
-                  (progress) {},
-                );
-                
+                final matrices = await ProjectHarmonizer.harmonizeProject(photos, (progress) {});
                 if (mounted) {
-                  Navigator.pop(context); // Закрываем индикатор загрузки
-                  
-                  // ✅ Применяем матрицы через ProjectNotifier
-                  ref.read(currentProjectProvider.notifier)
-                      .applyHarmonizationMatrices(matrices);
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Row(
-                        children: [
-                          Icon(Icons.check_circle, color: Colors.white),
-                          SizedBox(width: 8),
-                          Expanded(child: Text('✅ Все фото успешно гармонизированы!')),
-                        ],
-                      ),
-                      backgroundColor: Colors.green,
-                      duration: Duration(seconds: 3),
-                    ),
-                  );
+                  Navigator.pop(context);
+                  ref.read(currentProjectProvider.notifier).applyHarmonizationMatrices(matrices);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Фото гармонизированы!'), backgroundColor: Colors.green));
                 }
               } catch (e) {
                 if (mounted) {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Ошибка при гармонизации: $e'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red));
                 }
               }
             },
@@ -522,37 +348,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     );
   }
 
-  // ==========================================
-  // 🤖 Умный монтаж
-  // ==========================================
   void _openSmartMontage() {
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Сначала добавьте фото на таймлайн'),
-            backgroundColor: Colors.orange,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
       return;
     }
     _pauseAudio();
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SmartMontageScreen()),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const SmartMontageScreen()));
   }
 
-  // ==========================================
-  // 📐 Авто-предложение формата при первом фото
-  // ==========================================
   void _onFirstPhotoAdded() {
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isEmpty) return;
-
     _recommendedFormatFor(photos.first.imagePath).then((recommended) {
       if (!mounted) return;
       if (_mediaLibraryOpen) {
@@ -567,15 +375,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     try {
       final bytes = await File(path).readAsBytes();
       final size = await _decodeImageSize(bytes);
-      final rec = VideoFormat.recommendedForImage(
-        width: size.width,
-        height: size.height,
-      );
-      print('📐 РЕКОМЕНДАЦИЯ ФОРМАТА: ${VideoFormat.byId(rec).name} '
-          'для ${size.width.round()}×${size.height.round()}');
+      final rec = VideoFormat.recommendedForImage(width: size.width, height: size.height);
       return rec;
     } catch (e) {
-      print('⚠️ Не удалось определить ориентацию фото: $e');
       return 0;
     }
   }
@@ -583,19 +385,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   Future<ui.Size> _decodeImageSize(Uint8List bytes) {
     final completer = Completer<ui.Size>();
     ui.decodeImageFromList(bytes, (image) {
-      if (!completer.isCompleted) {
-        completer.complete(
-          ui.Size(image.width.toDouble(), image.height.toDouble()),
-        );
-      }
+      if (!completer.isCompleted) completer.complete(ui.Size(image.width.toDouble(), image.height.toDouble()));
     });
-    return completer.future.timeout(const Duration(seconds: 3),
-        onTimeout: () => const ui.Size(1, 1));
+    return completer.future.timeout(const Duration(seconds: 3), onTimeout: () => const ui.Size(1, 1));
   }
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Play/Pause превью → звук
     ref.listen<bool>(isPlayingProvider, (prev, playing) {
       if (playing) {
         _startTick();
@@ -606,41 +402,27 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       }
     });
 
-    // ✅ Плейхед: скраб → seek плеера; пересечение задержки старта → play
     ref.listen<double>(playheadMsProvider, (prev, ms) {
       final isPlaying = ref.read(isPlayingProvider);
       final track = ref.read(currentProjectProvider).audioTrack;
-
       if (track != null) {
         if (!isPlaying) {
-          final delta = (ms - _lastPlayheadMs).abs();
-          if (delta > 100) {
-            _seekToPlayhead();
-          }
+          if ((ms - _lastPlayheadMs).abs() > 100) _seekToPlayhead();
         } else {
-          final audioStartMs = track.startTime * 1000;
-          if (_lastPlayheadMs < audioStartMs && ms >= audioStartMs) {
-            _startAudio();
-          }
+          if (_lastPlayheadMs < track.startTime * 1000 && ms >= track.startTime * 1000) _startAudio();
         }
       }
-
       _lastPlayheadMs = ms;
     });
 
-    // ✅ Смена трека/громкости
-    ref.listen(currentProjectProvider.select((p) => p.audioTrack),
-        (prev, next) {
+    ref.listen(currentProjectProvider.select((p) => p.audioTrack), (prev, next) {
       if (prev?.filePath != next?.filePath) {
-        if (!ref.read(isPlayingProvider)) {
-          _pauseAudio();
-        }
+        if (!ref.read(isPlayingProvider)) _pauseAudio();
       } else if (prev?.volume != next?.volume) {
         ref.read(audioPlayerProvider).setVolume(next?.volume ?? 0.5);
       }
     });
 
-    // ✅ Первое фото → подсказка формата
     ref.listen(currentProjectProvider, (prev, next) {
       if ((prev?.photos.isEmpty ?? false) && next.photos.isNotEmpty) {
         _onFirstPhotoAdded();
@@ -658,119 +440,89 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-          leading: IconButton(
-            icon: const Icon(Icons.chevron_left, size: 28),
-            color: AppColors.textPrimary,
-            onPressed: _saveAndPop,
-          ),
-          title: Text(
-            project.name,
-            style: GoogleFonts.unbounded(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary),
-          ),
+          leading: IconButton(icon: const Icon(Icons.chevron_left, size: 28), color: AppColors.textPrimary, onPressed: _saveAndPop),
+          title: Text(project.name, style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           actions: [
+            IconButton(icon: const Icon(Icons.auto_awesome, size: 22), color: AppColors.aiAccent, tooltip: 'Умный монтаж', onPressed: _openSmartMontage),
             IconButton(
-              icon: const Icon(Icons.auto_awesome, size: 22),
-              color: AppColors.primary,
-              tooltip: 'Умный монтаж',
-              onPressed: _openSmartMontage,
-            ),
-            IconButton(
-              icon: Icon(
-                project.format.icon,
-                size: 22,
-                color: AppColors.textPrimary,
-              ),
-              tooltip:
-                  'Формат: ${project.format.name} (${project.format.ratio})',
+              icon: Icon(project.format.icon, size: 22, color: AppColors.textPrimary),
+              tooltip: 'Формат: ${project.format.name}',
               onPressed: () => showFormatSheet(context, ref),
             ),
-            IconButton(
-              icon: const Icon(Icons.video_library_outlined, size: 24),
-              color: AppColors.textPrimary,
-              tooltip: 'Медиатека',
-              onPressed: _openMediaLibrary,
-            ),
-            IconButton(
-              icon: const Icon(Icons.save_outlined, size: 24),
-              color: AppColors.textPrimary,
-              tooltip: 'Сохранить проект',
-              onPressed: () => _saveProject(showSnackBar: true),
-            ),
+            IconButton(icon: const Icon(Icons.video_library_outlined, size: 24), color: AppColors.textPrimary, tooltip: 'Медиатека', onPressed: _openMediaLibrary),
+            IconButton(icon: const Icon(Icons.save_outlined, size: 24), color: AppColors.textPrimary, tooltip: 'Сохранить', onPressed: () => _saveProject(showSnackBar: true)),
             TextButton(
               onPressed: () {
                 _pauseAudio();
                 ref.read(isPlayingProvider.notifier).state = false;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ExportScreen(project: project),
-                  ),
-                );
+                Navigator.push(context, MaterialPageRoute(builder: (context) => ExportScreen(project: project)));
               },
-              child: Text(
-                'Экспорт',
-                style: GoogleFonts.manrope(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary),
-              ),
+              child: Text('Экспорт', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.primary)),
             ),
           ],
         ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              const Expanded(child: EditorPreviewArea()),
-              Container(height: 1, color: AppColors.surfaceLight),
-              SizedBox(
-                height: 92,
-                child: EditorToolbar(
-                  onAddPhoto: _showPhotoSourceSheet,
-                  onAddText: () => showTextManagerSheet(context, ref),
-                  onAddAudio: () => showAudioManagerSheet(context, ref),
-                  onCrop: _openCropEditor,
-                  onOpenEffects: _openEffects,
-                  onOpenTransitions: _openTransitions,
-                  onOpenOverlays: _openOverlays,
-                  onOpenLiveMotion: _openLiveMotion,
-                  onOpenHarmonize: _openHarmonize, // 🆕 AI Гармонизация
+        // ✅ ИСПРАВЛЕНО: body — Stack с двумя слоями
+        // ... (всё до body остаётся без изменений) ...
+
+        body: Stack(
+          children: [
+            // Слой 0: основной контент (превью + таймлайн)
+            Column(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: const EditorPreviewArea(),
+                  ),
+                ),
+                SizedBox(height: 90), // Зона для центральной кнопки
+                Container(height: 1, color: AppColors.divider),
+                SizedBox(
+                  height: 170,
+                  child: EditorTimeline(
+                    zoom: timelineZoom,
+                    onZoomChanged: (value) => setState(() => timelineZoom = value),
+                  ),
+                ),
+              ],
+            ),
+
+            // Слой 1: круг меню поверх всего, но центрирован на зоне
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 68, // 170 (таймлайн) + 45 (половина зоны 90) - 150 (половина меню 300) = 65
+              child: Center(
+                child: RadialToolMenu(
+                  radius: 100.0,
+                  items: [
+                    RadialMenuItem(icon: Icons.image_outlined, label: 'Фото', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _showPhotoSourceSheet),
+                    RadialMenuItem(icon: Icons.crop, label: 'Обрезать', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openCropEditor),
+                    RadialMenuItem(icon: Icons.music_note, label: 'Музыка', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openMediaLibrary),
+                    RadialMenuItem(icon: Icons.auto_fix_high, label: 'Эффекты', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openEffects),
+                    RadialMenuItem(icon: Icons.text_fields, label: 'Текст', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: () => showTextManagerSheet(context, ref)),
+                    RadialMenuItem(icon: Icons.change_circle_outlined, label: 'Переходы', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openTransitions),
+                    RadialMenuItem(icon: Icons.layers_outlined, label: 'Оверлеи', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openOverlays),
+                    RadialMenuItem(icon: Icons.motion_photos_on_outlined, label: 'Движение', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openLiveMotion),
+                    RadialMenuItem(icon: Icons.auto_awesome, label: 'AI Цвет', color: AppColors.aiAccent, bgColor: AppColors.background, isAi: true, onTap: _openHarmonize),
+                  ],
                 ),
               ),
-              Container(height: 1, color: AppColors.surfaceLight),
-              SizedBox(
-                height: 170,
-                child: EditorTimeline(
-                  zoom: timelineZoom,
-                  onZoomChanged: (value) =>
-                      setState(() => timelineZoom = value),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-// ==========================================
-// Плитка выбора источника (в шторке фото)
-// ==========================================
 class _SourceTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
 
-  const _SourceTile({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
+  const _SourceTile({required this.icon, required this.title, required this.subtitle, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -799,27 +551,13 @@ class _SourceTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.manrope(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
+                  Text(title, style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                   const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: GoogleFonts.manrope(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
+                  Text(subtitle, style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right,
-                color: AppColors.textMuted, size: 22),
+            const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 22),
           ],
         ),
       ),

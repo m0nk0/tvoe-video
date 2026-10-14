@@ -347,3 +347,23 @@ class _CinematicPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _CinematicPainter old) => old.params != params;
 }
+
+// ==========================================
+// Вспомогательные функции для превью
+// ==========================================
+void togglePlayback(WidgetRef ref) {
+  final isPlaying = ref.read(isPlayingProvider);
+  ref.read(isPlayingProvider.notifier).state = !isPlaying;
+}
+
+void stepPlayback(WidgetRef ref, int deltaMs) {
+  final project = ref.read(currentProjectProvider);
+  final totalMs = project.photos.fold<int>(0, (s, p) => s + p.durationMilliseconds);
+  double currentMs = ref.read(playheadMsProvider);
+  double newMs = currentMs + deltaMs;
+  
+  if (newMs < 0) newMs = 0;
+  if (newMs > totalMs) newMs = totalMs.toDouble();
+  
+  ref.read(playheadMsProvider.notifier).state = newMs;
+}

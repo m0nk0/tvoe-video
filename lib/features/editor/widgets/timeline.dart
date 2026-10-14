@@ -691,3 +691,31 @@ class _TrianglePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+
+// ==========================================
+// Вспомогательные функции для таймлайна
+// ==========================================
+void togglePlayback(WidgetRef ref) {
+  final isPlaying = ref.read(isPlayingProvider);
+  ref.read(isPlayingProvider.notifier).state = !isPlaying;
+}
+
+int frameIndexForMs(List photos, int ms) {
+  int accumulated = 0;
+  for (int i = 0; i < photos.length; i++) {
+    final rawDuration = photos[i].durationMilliseconds ?? 3000;
+    // Явно приводим к int независимо от того, num это или double
+    accumulated += rawDuration is int ? rawDuration : (rawDuration as num).toInt();
+    if (ms < accumulated) return i;
+  }
+  return photos.isEmpty ? 0 : photos.length - 1;
+}
+
+int frameStartMs(List photos, int index) {
+  int accumulated = 0;
+  for (int i = 0; i < index; i++) {
+    final rawDuration = photos[i].durationMilliseconds ?? 3000;
+    accumulated += rawDuration is int ? rawDuration : (rawDuration as num).toInt();
+  }
+  return accumulated;
+}

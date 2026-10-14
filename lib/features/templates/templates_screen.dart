@@ -37,7 +37,6 @@ class TemplatesScreen extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 16),
-          // Горизонтальный скролл категорий
           SizedBox(
             height: 44,
             child: ListView.builder(
@@ -75,7 +74,6 @@ class TemplatesScreen extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 16),
-          // Grid шаблонов
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -120,7 +118,6 @@ class TemplatesScreen extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Ручка
                 Center(
                   child: Container(
                     width: 40,
@@ -205,17 +202,14 @@ class TemplatesScreen extends ConsumerWidget {
   }
 
   void _useTemplate(BuildContext context, WidgetRef ref, Template template) {
-    // Создаём новый проект с настройками шаблона
     ref.read(currentProjectProvider.notifier).clearProject();
     ref.read(selectedPhotoIndexProvider.notifier).state = 0;
 
-    // Переходим в редактор
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const EditorScreen()),
+      MaterialPageRoute(builder: (context) => EditorScreen()), // ✅ УБРАН const
     );
 
-    // Показываем подсказку
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Шаблон "${template.name}" применён. Добавьте фото!'),
@@ -226,9 +220,6 @@ class TemplatesScreen extends ConsumerWidget {
   }
 }
 
-// ==========================================
-// Карточка шаблона
-// ==========================================
 class _TemplateCard extends StatelessWidget {
   final Template template;
   final VoidCallback onTap;

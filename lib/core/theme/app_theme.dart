@@ -13,26 +13,27 @@ class AppTheme {
       primaryColor: AppColors.primary,
       colorScheme: const ColorScheme.dark(
         primary: AppColors.primary,
-        secondary: AppColors.primaryLight,
+        secondary: AppColors.aiAccent,
         surface: AppColors.surface,
+        background: AppColors.background,
         error: AppColors.error,
+        onPrimary: Colors.white,
+        onSecondary: Colors.white,
+        onSurface: AppColors.textPrimary,
+        onBackground: AppColors.textPrimary,
       ),
       textTheme: AppTextTheme.light,
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
         systemOverlayStyle: SystemUiOverlayStyle.light,
-        titleTextStyle: GoogleFonts.unbounded(
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
+        titleTextStyle: GoogleFonts.unbounded(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
       ),
       cardTheme: CardThemeData(
         color: AppColors.surface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: AppColors.primary, width: 1),
+          side: BorderSide(color: AppColors.border, width: 1),
         ),
         elevation: 0,
       ),
@@ -41,6 +42,20 @@ class AppTheme {
         foregroundColor: Colors.white,
         elevation: 4,
       ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: AppColors.surface,
+        modalBackgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+      dividerTheme: const DividerThemeData(color: AppColors.divider, thickness: 1),
     );
   }
 }
