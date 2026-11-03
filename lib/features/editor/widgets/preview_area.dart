@@ -75,7 +75,7 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
     setState(() { _showControls = true; });
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(seconds: 2), () {
-      if (mounted) setState(() { _showControls = false; });
+      if (mounted) setState(() => _showControls = false);
     });
   }
 
@@ -85,8 +85,32 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
     _showControlsTemporarily();
   }
 
+  // ✅ ИСПРАВЛЕНО: шаг на ЦЕЛЫЙ КАДР (в начало соседнего фото), а не на 1 мс
   void _onStep(int delta) {
-    stepPlayback(ref, delta);
+    final project = ref.read(currentProjectProvider);
+    if (project.photos.isEmpty) return;
+
+    final currentMs = ref.read(playheadMsProvider);
+
+    // Находим индекс текущего кадра по накопленной длительности
+    int acc = 0;
+    int idx = 0;
+    for (int i = 0; i < project.photos.length; i++) {
+      idx = i;
+      acc += project.photos[i].durationMilliseconds;
+      if (currentMs < acc) break;
+    }
+
+    // Целевой кадр с ограничением границ
+    final next = (idx + delta).clamp(0, project.photos.length - 1);
+
+    // Начало целевого кадра в мс
+    int startMs = 0;
+    for (int i = 0; i < next; i++) {
+      startMs += project.photos[i].durationMilliseconds;
+    }
+
+    ref.read(playheadMsProvider.notifier).state = startMs.toDouble();
     _showControlsTemporarily();
   }
 
@@ -133,8 +157,7 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
 
     ref.listen<int>(selectedPhotoIndexProvider, (prev, next) {
       if (prev != next && hasPhotos) {
-        final photo = project.photos[next];
-        _entranceController.duration = Duration(milliseconds: photo.entranceDurationMs);
+        _entranceController.duration = Duration(milliseconds: project.photos[next].entranceDurationMs);
         _entranceController.forward(from: 0);
       }
     });
@@ -206,7 +229,7 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
                                                     top: liveDst.top,
                                                     width: liveDst.width,
                                                     height: liveDst.height,
-                                                    child: 
+                                                    child:
                                                     // 🎨 НОВОЕ: Применяем матрицу гармонизации, если она есть в модели
                                                     currentPhoto.harmonizationMatrix != null
                                                         ? ColorFiltered(
@@ -332,7 +355,7 @@ class _OverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _OverlayPainter old) => old.type != type || old.timeMs != timeMs || old.intensity != intensity;
+  bool shouldRepaint(covariant _OverlayPainter old) => old.type != type || old.timeMs != old.intensity.toInt() || old.intensity != intensity;
 }
 
 class _CinematicPainter extends CustomPainter {
@@ -361,9 +384,9 @@ void stepPlayback(WidgetRef ref, int deltaMs) {
   final totalMs = project.photos.fold<int>(0, (s, p) => s + p.durationMilliseconds);
   double currentMs = ref.read(playheadMsProvider);
   double newMs = currentMs + deltaMs;
-  
+
   if (newMs < 0) newMs = 0;
   if (newMs > totalMs) newMs = totalMs.toDouble();
-  
+
   ref.read(playheadMsProvider.notifier).state = newMs;
 }
