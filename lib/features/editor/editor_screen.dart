@@ -43,6 +43,16 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   int? _pendingFormatId;
   double _lastPlayheadMs = 0;
 
+  // ✅ КОНСТАНТЫ ГЕОМЕТРИИ (никогда не собьются)
+    static const double _timelineHeight = 170;
+  static const double _dividerHeight = 1;
+  static const double _menuZoneHeight = 120;
+  static const double _menuSize = 300;
+  static const double _menuLift = 4; // 👈 НАСКОЛЬКО поднять кнопку над центром зоны
+
+  static const double _menuBottom =
+      _timelineHeight + _dividerHeight + _menuZoneHeight / 2 - _menuSize / 2 + _menuLift;
+
   @override
   void dispose() {
     _tick?.cancel();
@@ -113,7 +123,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       await player.play();
       ref.read(isAudioPlayingProvider.notifier).state = true;
     } catch (e) {
-      print('️ Ошибка запуска аудио: $e');
+      print('⚠️ Ошибка запуска аудио: $e');
     }
   }
 
@@ -209,10 +219,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   void _openMediaLibraryForPhotos() {
     _pauseAudio();
     _mediaLibraryOpen = true;
+    final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
+          initialSelectedPaths: currentPaths,
           singleSelectMode: false,
           onUsePhotos: (paths) {
             final notifier = ref.read(currentProjectProvider.notifier);
@@ -233,10 +246,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   void _openMediaLibrary() {
     _pauseAudio();
     _mediaLibraryOpen = true;
+    final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
+          initialSelectedPaths: currentPaths,
           singleSelectMode: true,
           onUseMusic: (track) {
             ref.read(currentProjectProvider.notifier).setAudioTrack(track);
@@ -461,12 +477,9 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
             ),
           ],
         ),
-        // ✅ ИСПРАВЛЕНО: body — Stack с двумя слоями
-        // ... (всё до body остаётся без изменений) ...
-
+        // ✅ СЛОЙ 0: контент. СЛОЙ 1: меню поверх всего.
         body: Stack(
           children: [
-            // Слой 0: основной контент (превью + таймлайн)
             Column(
               children: [
                 Expanded(
@@ -475,10 +488,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
                     child: const EditorPreviewArea(),
                   ),
                 ),
-                SizedBox(height: 90), // Зона для центральной кнопки
-                Container(height: 1, color: AppColors.divider),
+                const SizedBox(height: _menuZoneHeight), // зона кнопки 120
+                Container(height: _dividerHeight, color: AppColors.divider),
                 SizedBox(
-                  height: 170,
+                  height: _timelineHeight,
                   child: EditorTimeline(
                     zoom: timelineZoom,
                     onZoomChanged: (value) => setState(() => timelineZoom = value),
@@ -486,15 +499,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
                 ),
               ],
             ),
-
-            // Слой 1: круг меню поверх всего, но центрирован на зоне
+            // ✅ Кнопка/круг: второй слой, центр ровно в центре зоны 120px
             Positioned(
               left: 0,
               right: 0,
-              bottom: 68, // 170 (таймлайн) + 45 (половина зоны 90) - 150 (половина меню 300) = 65
+              bottom: _menuBottom, // = 81 (рассчитано из констант)
               child: Center(
                 child: RadialToolMenu(
-                  radius: 100.0,
+                  radius: 120.0,
                   items: [
                     RadialMenuItem(icon: Icons.image_outlined, label: 'Фото', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _showPhotoSourceSheet),
                     RadialMenuItem(icon: Icons.crop, label: 'Обрезать', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openCropEditor),

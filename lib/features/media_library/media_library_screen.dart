@@ -15,20 +15,19 @@ import 'widgets/import_tile.dart';
 import 'widgets/music_tab.dart';
 import 'widgets/photos_tab.dart';
 
-// ==========================================
-// Медиатека: клипы / музыка / фото
-// Точки импорта: 📷 и 🎵 в шапке
-// ==========================================
 class MediaLibraryScreen extends ConsumerStatefulWidget {
   final void Function(AudioTrack track)? onUseMusic;
   final void Function(List<String> photoPaths)? onUsePhotos;
   final bool singleSelectMode;
+  // ✅ НОВОЕ: начальные выбранные пути (чтобы подсветить уже добавленные в проект фото)
+  final Set<String> initialSelectedPaths;
 
   const MediaLibraryScreen({
     super.key,
     this.onUseMusic,
     this.onUsePhotos,
     this.singleSelectMode = false,
+    this.initialSelectedPaths = const {},
   });
 
   @override
@@ -41,12 +40,14 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
   AudioPlayer? _previewPlayer;
   String? _playingMusicPath;
   bool _isImporting = false;
-  Set<String> _selectedPhotoPaths = {};
+  late Set<String> _selectedPhotoPaths;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    // ✅ Инициализируем выбранные фото теми, что уже есть в проекте
+    _selectedPhotoPaths = Set.from(widget.initialSelectedPaths);
   }
 
   @override
@@ -72,8 +73,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     setState(() => _selectedPhotoPaths.clear());
   }
 
-    void _createProjectFromSelected() {
-    print('📚 MEDIA_LIBRARY: Создаю проект из ${_selectedPhotoPaths.length} выбранных фото');
+  void _createProjectFromSelected() {
+    print('📚 MEDIA_LIBRARY: Создаю/Обновляю проект из ${_selectedPhotoPaths.length} выбранных фото');
     
     if (_selectedPhotoPaths.isEmpty || widget.onUsePhotos == null) {
       print('⚠️ MEDIA_LIBRARY: Прервано (нет выбранных фото или колбэка)');
@@ -81,17 +82,10 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     }
     
     final paths = _selectedPhotoPaths.toList();
-    
-    // 1. Сначала передаем данные наверх (в HomeScreen)
     widget.onUsePhotos!(paths);
-    
-    // 2. Затем закрываем медиатеку
     Navigator.pop(context);
   }
 
-  // ==========================================
-  // 📥 Импорт фото из галереи
-  // ==========================================
   Future<void> _importPhotos() async {
     final picker = ImagePicker();
     final images = await picker.pickMultiImage(
@@ -129,9 +123,6 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     }
   }
 
-  // ==========================================
-  // 📷 Шторка выбора источника фото
-  // ==========================================
   void _showPhotoImportSheet() {
     showModalBottomSheet(
       context: context,
@@ -194,9 +185,6 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     );
   }
 
-  // ==========================================
-  // 📂 Браузер папок для фото
-  // ==========================================
   Future<void> _showDownloadsPhotoBrowser() async {
     showDialog(
       context: context,
@@ -213,8 +201,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
             children: [
               const CircularProgressIndicator(color: AppColors.primary),
               const SizedBox(height: 16),
-              Text('Поиск фото…',
-                  style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+              Text('Поиск фото…', style: GoogleFonts.manrope(color: AppColors.textPrimary)),
             ],
           ),
         ),
@@ -289,8 +276,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                   Expanded(
                     child: GridView.builder(
                       padding: const EdgeInsets.all(12),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 3,
                         crossAxisSpacing: 6,
                         mainAxisSpacing: 6,
@@ -328,14 +314,11 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                                 Positioned.fill(
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      color:
-                                          AppColors.primary.withOpacity(0.3),
+                                      color: AppColors.primary.withValues(alpha: 0.3),
                                       borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                          color: AppColors.primary, width: 2),
+                                      border: Border.all(color: AppColors.primary, width: 2),
                                     ),
-                                    child: const Icon(Icons.check,
-                                        color: Colors.white),
+                                    child: const Icon(Icons.check, color: Colors.white),
                                   ),
                                 ),
                             ],
@@ -349,8 +332,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                     decoration: BoxDecoration(
                       color: AppColors.surface,
                       border: Border(
-                        top: BorderSide(
-                            color: AppColors.primary.withValues(alpha: 0.3)),
+                        top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
                       ),
                     ),
                     child: Row(
@@ -360,15 +342,10 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                             onPressed: () => Navigator.pop(sheetCtx),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.textMuted,
-                              side: BorderSide(
-                                  color:
-                                      AppColors.primary.withValues(alpha: 0.3)),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
+                              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
-                            child: Text('Отмена',
-                                style: GoogleFonts.manrope(
-                                    fontWeight: FontWeight.w600)),
+                            child: Text('Отмена', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -379,23 +356,18 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                                 ? null
                                 : () async {
                                     Navigator.pop(sheetCtx);
-                                    await _importSelectedPhotos(
-                                        selected.toList());
+                                    await _importSelectedPhotos(selected.toList());
                                   },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             icon: const Icon(Icons.download, size: 18),
                             label: Text(
                               'Импортировать (${selected.length})',
-                              style: GoogleFonts.manrope(
-                                  fontWeight: FontWeight.w600),
+                              style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
                             ),
                           ),
                         ),
@@ -411,7 +383,6 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     );
   }
 
-  /// Сканирование фото на устройстве (Download, DCIM, Pictures)
   Future<List<File>> _scanPhotosOnDevice() async {
     const photoExts = {'jpg', 'jpeg', 'png', 'webp', 'bmp', 'heic'};
     final result = <File>[];
@@ -427,11 +398,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
       final dir = Directory(path);
       if (!await dir.exists()) continue;
       try {
-        final files = await dir
-            .list(recursive: false)
-            .where((e) => e is File)
-            .cast<File>()
-            .toList();
+        final files = await dir.list(recursive: false).where((e) => e is File).cast<File>().toList();
         for (final f in files) {
           final ext = f.path.split('.').last.toLowerCase();
           if (photoExts.contains(ext)) result.add(f);
@@ -441,12 +408,10 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
       }
     }
 
-    result.sort((a, b) =>
-        b.statSync().modified.compareTo(a.statSync().modified));
+    result.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
     return result;
   }
 
-  /// Импорт выбранных фото из браузера
   Future<void> _importSelectedPhotos(List<File> files) async {
     setState(() => _isImporting = true);
     final storage = ref.read(mediaStorageProvider);
@@ -470,13 +435,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     }
   }
 
-  // ==========================================
-  // 🎵 Превью музыки (для вкладки)
-  // ==========================================
   Future<void> _playMusic(String path) async {
-    if (_playingMusicPath == path &&
-        _previewPlayer != null &&
-        _previewPlayer!.playing) {
+    if (_playingMusicPath == path && _previewPlayer != null && _previewPlayer!.playing) {
       await _previewPlayer!.pause();
       setState(() => _playingMusicPath = null);
       return;
@@ -491,11 +451,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка воспроизведения: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 2),
-          ),
+          SnackBar(content: Text('Ошибка воспроизведения: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
         );
       }
     }
@@ -506,38 +462,17 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     setState(() => _playingMusicPath = null);
   }
 
-  // ==========================================
-  // 🗑 Удаление
-  // ==========================================
   Future<void> _deleteFile(File file, String type) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Удалить?',
-          style: GoogleFonts.unbounded(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Text(
-          'Файл «${MediaStorageService.displayName(file)}» будет удалён навсегда.',
-          style: GoogleFonts.manrope(color: AppColors.textSecondary),
-        ),
+        title: Text('Удалить?', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        content: Text('Файл «${MediaStorageService.displayName(file)}» будет удалён навсегда.', style: GoogleFonts.manrope(color: AppColors.textSecondary)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Отмена',
-                style: GoogleFonts.manrope(color: AppColors.textMuted)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Удалить',
-                style: GoogleFonts.manrope(color: AppColors.error)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Удалить', style: GoogleFonts.manrope(color: AppColors.error))),
         ],
       ),
     );
@@ -547,23 +482,11 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
         await file.delete();
         _refresh();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('$type удалён'),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 1),
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$type удалён'), backgroundColor: Colors.green, duration: const Duration(seconds: 1)));
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Ошибка удаления: $e'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 2),
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)));
         }
       }
     }
@@ -573,29 +496,20 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
   Widget build(BuildContext context) {
     final storage = ref.watch(mediaStorageProvider);
     final hasSelection = _selectedPhotoPaths.isNotEmpty;
-    final canCreateProject =
-        !widget.singleSelectMode && widget.onUsePhotos != null;
+    final canCreateProject = !widget.singleSelectMode && widget.onUsePhotos != null;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.textPrimary,
-        title: Text(
-          'Медиатека',
-          style: GoogleFonts.unbounded(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        title: Text('Медиатека', style: GoogleFonts.unbounded(fontSize: 20, fontWeight: FontWeight.w700)),
         actions: [
-          // ✅ КНОПКА 📷 ФОТО
           IconButton(
             icon: const Icon(Icons.photo_library_outlined, size: 24),
             tooltip: 'Добавить фото',
             onPressed: _showPhotoImportSheet,
           ),
-          // ✅ КНОПКА 🎵 МУЗЫКА
           IconButton(
             icon: const Icon(Icons.library_music_outlined, size: 24),
             tooltip: 'Добавить музыку',
@@ -607,13 +521,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
           if (hasSelection && !widget.singleSelectMode)
             TextButton(
               onPressed: _clearSelection,
-              child: Text(
-                'Сбросить',
-                style: GoogleFonts.manrope(
-                  fontSize: 14,
-                  color: AppColors.textMuted,
-                ),
-              ),
+              child: Text('Сбросить', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textMuted)),
             ),
         ],
         bottom: TabBar(
@@ -622,23 +530,11 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
           unselectedLabelColor: AppColors.textMuted,
           indicatorColor: AppColors.primary,
           indicatorWeight: 3,
-          labelStyle: GoogleFonts.manrope(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          labelStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
           tabs: [
-            Tab(
-              icon: const Icon(Icons.movie_outlined, size: 22),
-              text: 'Клипы (${storage.listClips().length})',
-            ),
-            Tab(
-              icon: const Icon(Icons.music_note_outlined, size: 22),
-              text: 'Музыка (${storage.listMusic().length})',
-            ),
-            Tab(
-              icon: const Icon(Icons.photo_outlined, size: 22),
-              text: 'Фото (${storage.listPhotos().length})',
-            ),
+            Tab(icon: const Icon(Icons.movie_outlined, size: 22), text: 'Клипы (${storage.listClips().length})'),
+            Tab(icon: const Icon(Icons.music_note_outlined, size: 22), text: 'Музыка (${storage.listMusic().length})'),
+            Tab(icon: const Icon(Icons.photo_outlined, size: 22), text: 'Фото (${storage.listPhotos().length})'),
           ],
         ),
       ),
@@ -675,7 +571,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                 PhotosTab(
                   files: storage.listPhotos(),
                   onDelete: (f) => _deleteFile(f, 'Фото'),
-                  selectedPaths: _selectedPhotoPaths,
+                  selectedPaths: _selectedPhotoPaths, // ✅ Теперь передает актуальный набор
                   onToggleSelection: _togglePhotoSelection,
                   selectionMode: canCreateProject,
                   singleSelectMode: widget.singleSelectMode,
@@ -684,23 +580,13 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
               ],
             ),
           ),
-          // Нижняя панель "Создать проект" — только в режиме множественного выбора
           if (hasSelection && canCreateProject)
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                border: Border(
-                  top: BorderSide(
-                      color: AppColors.primary.withValues(alpha: 0.3)),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 8,
-                    offset: const Offset(0, -2),
-                  ),
-                ],
+                border: Border(top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3))),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, -2))],
               ),
               child: SafeArea(
                 top: false,
@@ -713,18 +599,10 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                           backgroundColor: AppColors.surfaceLight,
                           foregroundColor: AppColors.primary,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         icon: const Icon(Icons.add, size: 20),
-                        label: Text(
-                          'Добавить',
-                          style: GoogleFonts.manrope(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        label: Text('Добавить', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -735,17 +613,13 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                           backgroundColor: AppColors.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        icon: const Icon(Icons.add, size: 20),
+                        icon: const Icon(Icons.check, size: 20),
                         label: Text(
-                          'Создать проект',
-                          style: GoogleFonts.manrope(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          // ✅ Меняем текст кнопки в зависимости от контекста
+                          widget.initialSelectedPaths.isNotEmpty ? 'Добавить в проект' : 'Создать проект',
+                          style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -754,33 +628,23 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
               ),
             )
           else if (!hasSelection && canCreateProject)
-            // ✅ ПОДСКАЗКА вместо дублирующей кнопки "Добавить фото"
             Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                border: Border(
-                  top: BorderSide(
-                      color: AppColors.primary.withValues(alpha: 0.3)),
-                ),
+                border: Border(top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3))),
               ),
               child: SafeArea(
                 top: false,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.touch_app_outlined,
-                        size: 18, color: AppColors.textMuted),
+                    const Icon(Icons.touch_app_outlined, size: 18, color: AppColors.textMuted),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Отмечай фото тапом или ➕, затем «Создать проект». '
-                        'Новые файлы — кнопки в шапке',
-                        style: GoogleFonts.manrope(
-                          fontSize: 12,
-                          color: AppColors.textMuted,
-                          height: 1.3,
-                        ),
+                        'Отмечай фото тапом или ➕, затем «${widget.initialSelectedPaths.isNotEmpty ? 'Добавить' : 'Создать'}». Новые файлы — кнопки в шапке',
+                        style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted, height: 1.3),
                       ),
                     ),
                   ],

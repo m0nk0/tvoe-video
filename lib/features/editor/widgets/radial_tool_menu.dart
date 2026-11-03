@@ -83,7 +83,7 @@ class _RadialToolMenuState extends State<RadialToolMenu> with SingleTickerProvid
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Glassmorphism круг-фон (только когда открыто)
+          // 1. Glassmorphism круг-фон (только когда открыто)
           if (_isOpen)
             AnimatedBuilder(
               animation: _controller,
@@ -106,7 +106,7 @@ class _RadialToolMenuState extends State<RadialToolMenu> with SingleTickerProvid
               },
             ),
 
-          // 9 кнопок по полному кругу
+          // 2. 9 кнопок по полному кругу
           ...List.generate(items.length, (index) {
             final item = items[index];
             final angle = -math.pi / 2 + (index * (2 * math.pi / items.length));
@@ -118,9 +118,8 @@ class _RadialToolMenuState extends State<RadialToolMenu> with SingleTickerProvid
               builder: (context, child) {
                 final progress = _controller.value;
                 return Positioned(
-                  left: menuSize / 2 + dx * progress - 24,
-                  top: menuSize / 2 + dy * progress - 24,
-                  // ✅ Когда меню закрыто, невидимые кнопки не перехватывают тапы
+                  left: menuSize / 2 + dx * progress - 27, // -27 потому что ширина кнопки теперь 54 (54/2)
+                  top: menuSize / 2 + dy * progress - 27,
                   child: IgnorePointer(
                     ignoring: !_isOpen,
                     child: Opacity(
@@ -140,28 +139,7 @@ class _RadialToolMenuState extends State<RadialToolMenu> with SingleTickerProvid
             );
           }),
 
-          // Tooltip над центральной кнопкой (после первого тапа)
-          if (_isOpen && _selectedIndex != null)
-            Positioned(
-              top: menuSize / 2 - 66,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Text(
-                    items[_selectedIndex!].label,
-                    style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
-                  ),
-                ),
-              ),
-            ),
-
-          // Центральная кнопка: видна ВСЕГДА, в центре круга
+          // 3. Центральная кнопка: видна ВСЕГДА, в центре круга
           GestureDetector(
             onTap: _toggle,
             child: AnimatedContainer(
@@ -199,6 +177,38 @@ class _RadialToolMenuState extends State<RadialToolMenu> with SingleTickerProvid
               ),
             ),
           ),
+
+          // 4. ✅ Tooltip (ВСПЛЫВАЮЩАЯ ПОДСКАЗКА) - В САМОМ КОНЦЕ STACK, чтобы быть поверх всего
+          if (_isOpen && _selectedIndex != null)
+            Positioned(
+              top: 70, // 👈 Подняли выше (между центральной кнопкой и верхним рядом)
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), // 👈 Чуть крупнее отступы
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withValues(alpha: 0.4),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    items[_selectedIndex!].label,
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,          // 👈 Увеличили шрифт
+                      fontWeight: FontWeight.w700, // 👈 Сделали жирнее
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -221,28 +231,35 @@ class _RadialButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 50,
-        height: 50,
+        width: 54,   // 👈 Увеличенный размер
+        height: 54,  
         decoration: BoxDecoration(
           shape: BoxShape.circle,
+          color: isSelected 
+              ? AppColors.primary 
+              : Colors.white.withValues(alpha: 0.15), // 👈 Стеклянный фон
           border: Border.all(
-            color: isSelected ? AppColors.primary : AppColors.border,
-            width: 2,
+            color: isSelected 
+                ? AppColors.primaryLight 
+                : Colors.white.withValues(alpha: 0.3),  // 👈 Светлая обводка
+            width: 1.5,
           ),
           boxShadow: isSelected
               ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.5), blurRadius: 10, spreadRadius: 2)]
-              : (item.isAi ? [BoxShadow(color: AppColors.aiAccent.withValues(alpha: 0.4), blurRadius: 8)] : null),
+              : (item.isAi 
+                  ? [BoxShadow(color: AppColors.aiAccent.withValues(alpha: 0.4), blurRadius: 8)]
+                  : [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 4)]),
         ),
         child: Container(
           margin: const EdgeInsets.all(4),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: isSelected ? AppColors.primary : AppColors.surfaceLight,
+            color: isSelected ? AppColors.primary : Colors.transparent,
           ),
           child: Icon(
             item.icon,
-            color: isSelected ? Colors.white : (item.isAi ? AppColors.aiAccent : item.color),
-            size: 21,
+            color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.9), // 👈 Белые иконки
+            size: 24,  // 👈 Увеличенная иконка
           ),
         ),
       ),

@@ -8,6 +8,7 @@ import '../../core/theme/colors.dart';
 import '../../data/models/video_project.dart';
 import '../../data/providers/project_provider.dart';
 import '../../data/providers/projects_provider.dart';
+import '../../data/providers/selection_provider.dart'; // ✅ Добавлен недостающий импорт
 import '../editor/editor_screen.dart';
 import '../media_library/media_library_screen.dart';
 import '../templates/templates_screen.dart';
@@ -103,18 +104,50 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
+  Future<String?> _promptProjectName(BuildContext context, {String defaultName = 'Новый проект'}) async {
+    final controller = TextEditingController(text: defaultName);
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Название проекта', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: AppColors.textPrimary),
+          decoration: InputDecoration(
+            hintText: 'Введите название',
+            hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.6)),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary.withValues(alpha: 0.4))),
+            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, null), child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted))),
+          TextButton(
+            onPressed: () {
+              final name = controller.text.trim();
+              Navigator.pop(ctx, name.isEmpty ? defaultName : name);
+            },
+            child: Text('Создать', style: GoogleFonts.manrope(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openMediaLibrary(BuildContext context, WidgetRef ref) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
+          initialSelectedPaths: const {}, 
           onUseMusic: (track) {
-            print('🏠 HOME: Выбрана музыка, закрываю медиатеку');
             Navigator.pop(context);
             _createProjectWithMusic(context, ref, track);
           },
           onUsePhotos: (paths) {
-            print('🏠 HOME: Получены фото (${paths.length} шт.), закрываю медиатеку');
             Navigator.pop(context);
             _createProjectWithPhotos(context, ref, paths);
           },
@@ -124,7 +157,9 @@ class HomeScreen extends ConsumerWidget {
   }
 
   Future<void> _createProjectWithMusic(BuildContext context, WidgetRef ref, dynamic track) async {
-    print('🏠 HOME: Создаю проект с музыкой');
+    final projectName = await _promptProjectName(context);
+    if (projectName == null || !context.mounted) return;
+
     try {
       final notifier = ref.read(currentProjectProvider.notifier);
       notifier.clearProject();
@@ -134,6 +169,12 @@ class HomeScreen extends ConsumerWidget {
       
       final project = ref.read(currentProjectProvider);
       await ref.read(projectRepositoryProvider).saveProject(project);
+      
+      // ✅ ИСПРАВЛЕНО: используем project.id вместо несуществующего saved.id
+      if (projectName != 'Новый проект') {
+         ref.read(projectsProvider.notifier).rename(project.id, projectName);
+      }
+      
       ref.read(projectsProvider.notifier).refresh();
       
       if (context.mounted) {
@@ -143,52 +184,43 @@ class HomeScreen extends ConsumerWidget {
       print('❌ ОШИБКА создания проекта с музыкой: $e');
       print(st);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red));
       }
     }
   }
 
   Future<void> _createProjectWithPhotos(BuildContext context, WidgetRef ref, List<String> paths) async {
-    print('🏠 HOME: Начинаю создание проекта с ${paths.length} фото');
+    final projectName = await _promptProjectName(context);
+    if (projectName == null || !context.mounted) return;
+
     try {
       final notifier = ref.read(currentProjectProvider.notifier);
       notifier.clearProject();
 
       for (final path in paths) {
-        print('🏠 HOME: Добавляю фото: $path');
         notifier.addPhotoByPath(path);
       }
 
       await Future.delayed(const Duration(milliseconds: 100));
 
       final project = ref.read(currentProjectProvider);
-      print('🏠 HOME: В стейте проекта ${project.photos.length} фото');
-
-      print('🏠 HOME: Сохраняю проект...');
       await ref.read(projectRepositoryProvider).saveProject(project);
+      
+      // ✅ ИСПРАВЛЕНО: используем project.id
+      if (projectName != 'Новый проект') {
+         ref.read(projectsProvider.notifier).rename(project.id, projectName);
+      }
+      
       ref.read(projectsProvider.notifier).refresh();
 
-      print('🏠 HOME: Проект сохранен, открываю редактор');
-
       if (context.mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => EditorScreen()),
-        );
+        Navigator.push(context, MaterialPageRoute(builder: (_) => EditorScreen()));
       }
     } catch (e, st) {
       print('❌ ОШИБКА создания проекта с фото: $e');
       print(st);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ошибка создания проекта: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка создания проекта: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 3)));
       }
     }
   }
@@ -224,10 +256,23 @@ class HomeScreen extends ConsumerWidget {
                   icon: Icons.add_photo_alternate,
                   title: 'Пустой проект',
                   subtitle: 'Начните с нуля — добавьте фото и настройте вручную',
-                  onTap: () {
+                  onTap: () async {
                     Navigator.pop(sheetContext);
+                    final projectName = await _promptProjectName(context);
+                    if (projectName == null || !context.mounted) return;
+                    
                     ref.read(currentProjectProvider.notifier).clearProject();
                     ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+                    
+                    final project = ref.read(currentProjectProvider);
+                    await ref.read(projectRepositoryProvider).saveProject(project);
+                    
+                    // ✅ ИСПРАВЛЕНО: используем project.id
+                    if (projectName != 'Новый проект') {
+                      ref.read(projectsProvider.notifier).rename(project.id, projectName);
+                    }
+                    ref.read(projectsProvider.notifier).refresh();
+                    
                     Navigator.push(context, MaterialPageRoute(builder: (context) => EditorScreen()));
                   },
                 ),

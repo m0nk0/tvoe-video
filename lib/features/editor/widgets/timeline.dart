@@ -305,48 +305,40 @@ class _EditorTimelineState extends ConsumerState<EditorTimeline> {
         Expanded(
           child: Stack(
             children: [
-              if (project.photos.isEmpty)
-                Center(
-                  child: Text(
-                    'Нажмите "Фото", чтобы добавить изображения',
-                    style: GoogleFonts.manrope(
-                        color: AppColors.textMuted, fontSize: 14),
-                  ),
-                )
-              else
-                ReorderableListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  scrollController: _controller,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
-                  itemCount: project.photos.length,
-                  onReorder: (oldIndex, newIndex) => ref
-                      .read(currentProjectProvider.notifier)
-                      .reorderPhotos(oldIndex, newIndex),
-                  itemBuilder: (context, index) {
-                    final photo = project.photos[index];
-                    return _TimelineItem(
-                      key: ValueKey('${photo.imagePath}_$index'),
-                      photo: photo,
-                      isSelected: index == selectedIndex,
-                      selectionMode: isSelection,
-                      isChecked: selectedFrames.contains(index),
-                      width: _widthOf(photo),
-                      onTap: () {
-                        if (isSelection) {
-                          // ✅ В режиме выделения — переключаем галочку
-                          SelectionController(ref).toggle(index);
-                        } else {
-                          ref.read(selectedPhotoIndexProvider.notifier).state =
-                              index;
-                          ref.read(playheadMsProvider.notifier).state =
-                              frameStartMs(project.photos, index).toDouble();
-                          showPhotoSettingsSheet(context, ref, index);
-                        }
-                      },
-                    );
-                  },
-                ),
+              // ✅ УБРАНА подсказка "Нажмите Фото..." — оставлен только список
+              ReorderableListView.builder(
+                scrollDirection: Axis.horizontal,
+                scrollController: _controller,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                itemCount: project.photos.length,
+                onReorder: (oldIndex, newIndex) => ref
+                    .read(currentProjectProvider.notifier)
+                    .reorderPhotos(oldIndex, newIndex),
+                itemBuilder: (context, index) {
+                  final photo = project.photos[index];
+                  return _TimelineItem(
+                    key: ValueKey('${photo.imagePath}_$index'),
+                    photo: photo,
+                    isSelected: index == selectedIndex,
+                    selectionMode: isSelection,
+                    isChecked: selectedFrames.contains(index),
+                    width: _widthOf(photo),
+                    onTap: () {
+                      if (isSelection) {
+                        // ✅ В режиме выделения — переключаем галочку
+                        SelectionController(ref).toggle(index);
+                      } else {
+                        ref.read(selectedPhotoIndexProvider.notifier).state =
+                            index;
+                        ref.read(playheadMsProvider.notifier).state =
+                            frameStartMs(project.photos, index).toDouble();
+                        showPhotoSettingsSheet(context, ref, index);
+                      }
+                    },
+                  );
+                },
+              ),
 
               if (project.photos.isNotEmpty && !isSelection)
                 Positioned(
