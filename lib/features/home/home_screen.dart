@@ -8,7 +8,7 @@ import '../../core/theme/colors.dart';
 import '../../data/models/video_project.dart';
 import '../../data/providers/project_provider.dart';
 import '../../data/providers/projects_provider.dart';
-import '../../data/providers/selection_provider.dart'; // ✅ Добавлен недостающий импорт
+import '../../data/providers/selection_provider.dart';
 import '../editor/editor_screen.dart';
 import '../media_library/media_library_screen.dart';
 import '../templates/templates_screen.dart';
@@ -25,22 +25,14 @@ class HomeScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text(
           'Твоё Видео',
-          style: GoogleFonts.unbounded(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
+          style: GoogleFonts.unbounded(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
         ),
         actions: [
           TextButton(
             onPressed: () => _openMediaLibrary(context, ref),
             child: Text(
               'Медиатека',
-              style: GoogleFonts.manrope(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: AppColors.primary,
-              ),
+              style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.primary),
             ),
           ),
           const SizedBox(width: 8),
@@ -142,7 +134,7 @@ class HomeScreen extends ConsumerWidget {
       context,
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
-          initialSelectedPaths: const {}, 
+          initialSelectedPaths: const {},
           onUseMusic: (track) {
             Navigator.pop(context);
             _createProjectWithMusic(context, ref, track);
@@ -164,19 +156,15 @@ class HomeScreen extends ConsumerWidget {
       final notifier = ref.read(currentProjectProvider.notifier);
       notifier.clearProject();
       notifier.setAudioTrack(track);
-      
+      // ✅ ИСПРАВЛЕНО: синхронизируем имя в currentProjectProvider ДО сохранения
+      notifier.setName(projectName);
+
       await Future.delayed(const Duration(milliseconds: 100));
-      
+
       final project = ref.read(currentProjectProvider);
       await ref.read(projectRepositoryProvider).saveProject(project);
-      
-      // ✅ ИСПРАВЛЕНО: используем project.id вместо несуществующего saved.id
-      if (projectName != 'Новый проект') {
-         ref.read(projectsProvider.notifier).rename(project.id, projectName);
-      }
-      
       ref.read(projectsProvider.notifier).refresh();
-      
+
       if (context.mounted) {
         Navigator.push(context, MaterialPageRoute(builder: (_) => EditorScreen()));
       }
@@ -200,17 +188,13 @@ class HomeScreen extends ConsumerWidget {
       for (final path in paths) {
         notifier.addPhotoByPath(path);
       }
+      // ✅ ИСПРАВЛЕНО: синхронизируем имя в currentProjectProvider ДО сохранения
+      notifier.setName(projectName);
 
       await Future.delayed(const Duration(milliseconds: 100));
 
       final project = ref.read(currentProjectProvider);
       await ref.read(projectRepositoryProvider).saveProject(project);
-      
-      // ✅ ИСПРАВЛЕНО: используем project.id
-      if (projectName != 'Новый проект') {
-         ref.read(projectsProvider.notifier).rename(project.id, projectName);
-      }
-      
       ref.read(projectsProvider.notifier).refresh();
 
       if (context.mounted) {
@@ -260,19 +244,16 @@ class HomeScreen extends ConsumerWidget {
                     Navigator.pop(sheetContext);
                     final projectName = await _promptProjectName(context);
                     if (projectName == null || !context.mounted) return;
-                    
+
                     ref.read(currentProjectProvider.notifier).clearProject();
                     ref.read(selectedPhotoIndexProvider.notifier).state = 0;
-                    
+                    // ✅ ИСПРАВЛЕНО: синхронизируем имя в currentProjectProvider ДО сохранения
+                    ref.read(currentProjectProvider.notifier).setName(projectName);
+
                     final project = ref.read(currentProjectProvider);
                     await ref.read(projectRepositoryProvider).saveProject(project);
-                    
-                    // ✅ ИСПРАВЛЕНО: используем project.id
-                    if (projectName != 'Новый проект') {
-                      ref.read(projectsProvider.notifier).rename(project.id, projectName);
-                    }
                     ref.read(projectsProvider.notifier).refresh();
-                    
+
                     Navigator.push(context, MaterialPageRoute(builder: (context) => EditorScreen()));
                   },
                 ),

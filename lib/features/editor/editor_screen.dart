@@ -216,7 +216,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     );
   }
 
-  void _openMediaLibraryForPhotos() {
+    void _openMediaLibraryForPhotos() {
     _pauseAudio();
     _mediaLibraryOpen = true;
     final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
@@ -226,6 +226,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
           initialSelectedPaths: currentPaths,
+          isEditingProject: true, // ✅ НОВОЕ
           singleSelectMode: false,
           onUsePhotos: (paths) {
             final notifier = ref.read(currentProjectProvider.notifier);
@@ -253,7 +254,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
           initialSelectedPaths: currentPaths,
-          singleSelectMode: true,
+          isEditingProject: true, // ✅ НОВОЕ
+          singleSelectMode: false,
           onUseMusic: (track) {
             ref.read(currentProjectProvider.notifier).setAudioTrack(track);
           },

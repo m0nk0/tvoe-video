@@ -19,8 +19,9 @@ class MediaLibraryScreen extends ConsumerStatefulWidget {
   final void Function(AudioTrack track)? onUseMusic;
   final void Function(List<String> photoPaths)? onUsePhotos;
   final bool singleSelectMode;
-  // ✅ НОВОЕ: начальные выбранные пути (чтобы подсветить уже добавленные в проект фото)
   final Set<String> initialSelectedPaths;
+  // ✅ НОВОЕ: флаг режима "внутри проекта"
+  final bool isEditingProject;
 
   const MediaLibraryScreen({
     super.key,
@@ -28,6 +29,7 @@ class MediaLibraryScreen extends ConsumerStatefulWidget {
     this.onUsePhotos,
     this.singleSelectMode = false,
     this.initialSelectedPaths = const {},
+    this.isEditingProject = false,
   });
 
   @override
@@ -46,7 +48,6 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    // ✅ Инициализируем выбранные фото теми, что уже есть в проекте
     _selectedPhotoPaths = Set.from(widget.initialSelectedPaths);
   }
 
@@ -74,13 +75,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
   }
 
   void _createProjectFromSelected() {
-    print('📚 MEDIA_LIBRARY: Создаю/Обновляю проект из ${_selectedPhotoPaths.length} выбранных фото');
-    
-    if (_selectedPhotoPaths.isEmpty || widget.onUsePhotos == null) {
-      print('⚠️ MEDIA_LIBRARY: Прервано (нет выбранных фото или колбэка)');
-      return;
-    }
-    
+    if (_selectedPhotoPaths.isEmpty || widget.onUsePhotos == null) return;
     final paths = _selectedPhotoPaths.toList();
     widget.onUsePhotos!(paths);
     Navigator.pop(context);
@@ -264,10 +259,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                         const SizedBox(height: 4),
                         Text(
                           'Найдено: ${photos.length} • Выбрано: ${selected.length}',
-                          style: GoogleFonts.manrope(
-                            fontSize: 12,
-                            color: AppColors.textMuted,
-                          ),
+                          style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
                         ),
                       ],
                     ),
@@ -331,9 +323,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: AppColors.surface,
-                      border: Border(
-                        top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
-                      ),
+                      border: Border(top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3))),
                     ),
                     child: Row(
                       children: [
@@ -482,11 +472,15 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
         await file.delete();
         _refresh();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$type удалён'), backgroundColor: Colors.green, duration: const Duration(seconds: 1)));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$type удалён'), backgroundColor: Colors.green, duration: const Duration(seconds: 1)),
+          );
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Ошибка удаления: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
+          );
         }
       }
     }
@@ -497,6 +491,12 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     final storage = ref.watch(mediaStorageProvider);
     final hasSelection = _selectedPhotoPaths.isNotEmpty;
     final canCreateProject = !widget.singleSelectMode && widget.onUsePhotos != null;
+
+    // ✅ ТЕКСТЫ КНОПОК В ЗАВИСИМОСТИ ОТ КОНТЕКСТА
+    final leftButtonLabel = widget.isEditingProject ? 'Источники' : 'Добавить';
+    final leftButtonIcon = widget.isEditingProject ? Icons.photo_library_outlined : Icons.add;
+    final rightButtonLabel = widget.isEditingProject ? 'Добавить в проект' : 'Создать проект';
+    final hintAction = widget.isEditingProject ? 'Добавить в проект' : 'Создать проект';
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -571,7 +571,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                 PhotosTab(
                   files: storage.listPhotos(),
                   onDelete: (f) => _deleteFile(f, 'Фото'),
-                  selectedPaths: _selectedPhotoPaths, // ✅ Теперь передает актуальный набор
+                  selectedPaths: _selectedPhotoPaths,
                   onToggleSelection: _togglePhotoSelection,
                   selectionMode: canCreateProject,
                   singleSelectMode: widget.singleSelectMode,
@@ -580,6 +580,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
               ],
             ),
           ),
+          // ✅ Нижняя панель — тексты зависят от контекста
           if (hasSelection && canCreateProject)
             Container(
               padding: const EdgeInsets.all(16),
@@ -601,8 +602,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        icon: const Icon(Icons.add, size: 20),
-                        label: Text('Добавить', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
+                        icon: Icon(leftButtonIcon, size: 20),
+                        label: Text(leftButtonLabel, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -617,8 +618,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                         ),
                         icon: const Icon(Icons.check, size: 20),
                         label: Text(
-                          // ✅ Меняем текст кнопки в зависимости от контекста
-                          widget.initialSelectedPaths.isNotEmpty ? 'Добавить в проект' : 'Создать проект',
+                          rightButtonLabel,
                           style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
                         ),
                       ),
@@ -643,7 +643,7 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Отмечай фото тапом или ➕, затем «${widget.initialSelectedPaths.isNotEmpty ? 'Добавить' : 'Создать'}». Новые файлы — кнопки в шапке',
+                        'Отмечай фото тапом, затем «$hintAction». ${widget.isEditingProject ? 'Новые фото — через "Источники"' : 'Новые файлы — кнопки в шапке'}',
                         style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted, height: 1.3),
                       ),
                     ),
