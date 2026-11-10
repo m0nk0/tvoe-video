@@ -15,7 +15,7 @@ import '../../../data/models/photo_layer.dart';
 import '../../../data/models/text_layer.dart';
 import '../../../data/models/video_project.dart';
 import '../../../data/providers/project_provider.dart';
-import '../playback.dart';
+import '../playback.dart'; // ✅ Теперь функции берутся отсюда
 import '../text_tools.dart';
 import 'transitions_render.dart';
 
@@ -81,18 +81,17 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
 
   void _togglePlay() {
     if (_isEditingText) setState(() => _isEditingText = false);
-    togglePlayback(ref);
+    togglePlayback(ref); // ✅ Берется из playback.dart
     _showControlsTemporarily();
   }
 
-  // ✅ ИСПРАВЛЕНО: шаг на ЦЕЛЫЙ КАДР (в начало соседнего фото), а не на 1 мс
+  // ✅ ИСПРАВЛЕНО: шаг на ЦЕЛЫЙ КАДР (в начало соседнего фото)
   void _onStep(int delta) {
     final project = ref.read(currentProjectProvider);
     if (project.photos.isEmpty) return;
 
     final currentMs = ref.read(playheadMsProvider);
 
-    // Находим индекс текущего кадра по накопленной длительности
     int acc = 0;
     int idx = 0;
     for (int i = 0; i < project.photos.length; i++) {
@@ -101,10 +100,8 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
       if (currentMs < acc) break;
     }
 
-    // Целевой кадр с ограничением границ
     final next = (idx + delta).clamp(0, project.photos.length - 1);
 
-    // Начало целевого кадра в мс
     int startMs = 0;
     for (int i = 0; i < next; i++) {
       startMs += project.photos[i].durationMilliseconds;
@@ -229,9 +226,7 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
                                                     top: liveDst.top,
                                                     width: liveDst.width,
                                                     height: liveDst.height,
-                                                    child:
-                                                    // 🎨 НОВОЕ: Применяем матрицу гармонизации, если она есть в модели
-                                                    currentPhoto.harmonizationMatrix != null
+                                                    child: currentPhoto.harmonizationMatrix != null
                                                         ? ColorFiltered(
                                                             colorFilter: ColorFilter.matrix(currentPhoto.harmonizationMatrix!),
                                                             child: Image.file(File(currentPhoto.imagePath), fit: BoxFit.fill, errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: AppColors.error))),
@@ -355,7 +350,7 @@ class _OverlayPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _OverlayPainter old) => old.type != type || old.timeMs != old.intensity.toInt() || old.intensity != intensity;
+  bool shouldRepaint(covariant _OverlayPainter old) => old.type != type || old.timeMs != timeMs || old.intensity != intensity;
 }
 
 class _CinematicPainter extends CustomPainter {
@@ -369,24 +364,4 @@ class _CinematicPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CinematicPainter old) => old.params != params;
-}
-
-// ==========================================
-// Вспомогательные функции для превью
-// ==========================================
-void togglePlayback(WidgetRef ref) {
-  final isPlaying = ref.read(isPlayingProvider);
-  ref.read(isPlayingProvider.notifier).state = !isPlaying;
-}
-
-void stepPlayback(WidgetRef ref, int deltaMs) {
-  final project = ref.read(currentProjectProvider);
-  final totalMs = project.photos.fold<int>(0, (s, p) => s + p.durationMilliseconds);
-  double currentMs = ref.read(playheadMsProvider);
-  double newMs = currentMs + deltaMs;
-
-  if (newMs < 0) newMs = 0;
-  if (newMs > totalMs) newMs = totalMs.toDouble();
-
-  ref.read(playheadMsProvider.notifier).state = newMs;
 }
