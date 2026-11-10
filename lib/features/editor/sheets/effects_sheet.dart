@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // ✅ НОВОЕ: для HapticFeedback
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -49,7 +50,6 @@ class EffectsSheetContentState extends ConsumerState<EffectsSheetContent> {
   @override
   void initState() {
     super.initState();
-    // Для превью берём первый кадр из списка выбранных
     final firstIdx = widget.targets.first;
     final photo = ref.read(currentProjectProvider).photos[firstIdx];
     _selectedFilter = photo.filter ?? FilterType.none;
@@ -58,13 +58,20 @@ class EffectsSheetContentState extends ConsumerState<EffectsSheetContent> {
   }
 
   void _apply() {
+    HapticFeedback.mediumImpact(); // ✅ Тактильный отклик на применение
     final notifier = ref.read(currentProjectProvider.notifier);
     final targets = _applyToAll ? _allIndices() : widget.targets;
 
-    for (final idx in targets) {
-      notifier.updatePhotoFilter(idx, _selectedFilter);
-      notifier.updatePhotoEntranceAnimation(idx, _selectedEntrance);
-      notifier.updatePhotoEntranceDuration(idx, _selectedDuration);
+    // ✅ ИСПРАВЛЕНО: пакетный режим — всё = ОДИН шаг Undo
+    notifier.beginBatch();
+    try {
+      for (final idx in targets) {
+        notifier.updatePhotoFilter(idx, _selectedFilter);
+        notifier.updatePhotoEntranceAnimation(idx, _selectedEntrance);
+        notifier.updatePhotoEntranceDuration(idx, _selectedDuration);
+      }
+    } finally {
+      notifier.endBatch();
     }
     Navigator.pop(context);
   }
@@ -135,7 +142,10 @@ class EffectsSheetContentState extends ConsumerState<EffectsSheetContent> {
                 final isSelected = _selectedFilter == filter;
 
                 return GestureDetector(
-                  onTap: () => setState(() => _selectedFilter = filter),
+                  onTap: () {
+                    HapticFeedback.selectionClick(); // ✅ Лёгкий отклик на выбор
+                    setState(() => _selectedFilter = filter);
+                  },
                   child: Column(
                     children: [
                       Container(
@@ -202,7 +212,10 @@ class EffectsSheetContentState extends ConsumerState<EffectsSheetContent> {
                 final isSelected = _selectedEntrance == anim;
 
                 return GestureDetector(
-                  onTap: () => setState(() => _selectedEntrance = anim),
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _selectedEntrance = anim);
+                  },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     decoration: BoxDecoration(
@@ -269,7 +282,6 @@ class EffectsSheetContentState extends ConsumerState<EffectsSheetContent> {
             ),
           ),
 
-          // Свитч "ко всем" показываем только в обычном режиме
           if (!_isMulti) ...[
             const SizedBox(height: 8),
             GestureDetector(

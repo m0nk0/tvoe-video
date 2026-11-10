@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // ✅ НОВОЕ: для HapticFeedback
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -36,7 +37,6 @@ class EditorScreen extends ConsumerStatefulWidget {
   ConsumerState<EditorScreen> createState() => _EditorScreenState();
 }
 
-// ✅ НОВОЕ: Добавляем WidgetsBindingObserver для отслеживания сворачивания приложения
 class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBindingObserver {
   double timelineZoom = 1.0;
   Timer? _tick;
@@ -49,7 +49,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   static const double _dividerHeight = 1;
   static const double _menuZoneHeight = 120;
   static const double _menuSize = 300;
-  static const double _menuLift = 4; // 👈 НАСКОЛЬКО поднять кнопку над центром зоны
+  static const double _menuLift = 4;
 
   static const double _menuBottom =
       _timelineHeight + _dividerHeight + _menuZoneHeight / 2 - _menuSize / 2 + _menuLift;
@@ -57,26 +57,24 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   @override
   void initState() {
     super.initState();
-    // ✅ НОВОЕ: Регистрируем наблюдатель за жизненным циклом приложения
     WidgetsBinding.instance.addObserver(this);
   }
 
   @override
   void dispose() {
-    // ✅ НОВОЕ: Обязательно удаляем наблюдатель при уничтожении виджета
     WidgetsBinding.instance.removeObserver(this);
     _tick?.cancel();
     super.dispose();
   }
 
-  // ✅ НОВОЕ: Перехватываем сворачивание/закрытие приложения для автосохранения
+  // ✅ АВТОСОХРАНЕНИЕ при сворачивании/закрытии
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || 
-        state == AppLifecycleState.detached || 
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
       print('🔄 АВТОСОХРАНЕНИЕ при сворачивании/закрытии приложения');
-      _saveProject(showSnackBar: false); // Сохраняем тихо, без всплывающих окон
+      _saveProject(showSnackBar: false);
     }
   }
 
@@ -160,14 +158,15 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     final hasContent = project.photos.isNotEmpty || project.texts.isNotEmpty || project.audioTrack != null;
 
     if (!hasContent) {
-      return; // Если проект пустой, молча выходим, не создаём мусор
+      return; // Пустой проект не сохраняем
     }
 
     try {
       await ref.read(projectRepositoryProvider).saveProject(project);
       ref.read(projectsProvider.notifier).refresh();
-      
+
       if (showSnackBar && mounted) {
+        HapticFeedback.mediumImpact(); // ✅ Тактильный отклик на успех
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Проект сохранён'), backgroundColor: Colors.green, duration: Duration(seconds: 1)),
         );
@@ -190,6 +189,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _showPhotoSourceSheet() {
+    HapticFeedback.lightImpact(); // ✅
     _pauseAudio();
     showModalBottomSheet(
       context: context,
@@ -234,6 +234,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openMediaLibraryForPhotos() {
+    HapticFeedback.lightImpact(); // ✅
     _pauseAudio();
     _mediaLibraryOpen = true;
     final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
@@ -262,6 +263,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openMediaLibrary() {
+    HapticFeedback.lightImpact(); // ✅
     _pauseAudio();
     _mediaLibraryOpen = true;
     final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
@@ -293,6 +295,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openCropEditor() {
+    HapticFeedback.lightImpact(); // ✅
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
@@ -303,6 +306,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openEffects() {
+    HapticFeedback.lightImpact(); // ✅
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
@@ -313,6 +317,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openTransitions() {
+    HapticFeedback.lightImpact(); // ✅
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
@@ -323,14 +328,17 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openOverlays() {
+    HapticFeedback.lightImpact(); // ✅
     showOverlaysSheet(context, ref);
   }
 
   void _openLiveMotion() {
+    HapticFeedback.lightImpact(); // ✅
     showLiveMotionSheet(context, ref);
   }
 
   void _openHarmonize() {
+    HapticFeedback.lightImpact(); // ✅
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
@@ -367,6 +375,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                 if (mounted) {
                   Navigator.pop(context);
                   ref.read(currentProjectProvider.notifier).applyHarmonizationMatrices(matrices);
+                  HapticFeedback.heavyImpact(); // ✅ Сильный отклик на AI-операцию
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Фото гармонизированы!'), backgroundColor: Colors.green));
                 }
               } catch (e) {
@@ -384,6 +393,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openSmartMontage() {
+    HapticFeedback.lightImpact(); // ✅
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
@@ -465,6 +475,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     });
 
     final project = ref.watch(currentProjectProvider);
+    // ✅ НОВОЕ: состояние Undo/Redo (build пересобирается при каждом изменении state)
+    final notifier = ref.read(currentProjectProvider.notifier);
+    final canUndo = notifier.canUndo;
+    final canRedo = notifier.canRedo;
 
     return PopScope(
       canPop: false,
@@ -478,6 +492,31 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
           leading: IconButton(icon: const Icon(Icons.chevron_left, size: 28), color: AppColors.textPrimary, onPressed: _saveAndPop),
           title: Text(project.name, style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
           actions: [
+            // ✅ НОВОЕ: Undo / Redo
+            IconButton(
+              icon: const Icon(Icons.undo, size: 20),
+              tooltip: 'Отменить',
+              color: AppColors.textPrimary,
+              disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
+              onPressed: canUndo
+                  ? () {
+                      HapticFeedback.lightImpact();
+                      ref.read(currentProjectProvider.notifier).undo();
+                    }
+                  : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.redo, size: 20),
+              tooltip: 'Вернуть',
+              color: AppColors.textPrimary,
+              disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
+              onPressed: canRedo
+                  ? () {
+                      HapticFeedback.lightImpact();
+                      ref.read(currentProjectProvider.notifier).redo();
+                    }
+                  : null,
+            ),
             IconButton(icon: const Icon(Icons.auto_awesome, size: 22), color: AppColors.aiAccent, tooltip: 'Умный монтаж', onPressed: _openSmartMontage),
             IconButton(
               icon: Icon(project.format.icon, size: 22, color: AppColors.textPrimary),
@@ -485,7 +524,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
               onPressed: () => showFormatSheet(context, ref),
             ),
             IconButton(icon: const Icon(Icons.video_library_outlined, size: 24), color: AppColors.textPrimary, tooltip: 'Медиатека', onPressed: _openMediaLibrary),
-            IconButton(icon: const Icon(Icons.save_outlined, size: 24), color: AppColors.textPrimary, tooltip: 'Сохранить', onPressed: () => _saveProject(showSnackBar: true)),
             TextButton(
               onPressed: () {
                 _pauseAudio();
@@ -507,7 +545,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                     child: const EditorPreviewArea(),
                   ),
                 ),
-                const SizedBox(height: _menuZoneHeight), // зона кнопки 120
+                const SizedBox(height: _menuZoneHeight),
                 Container(height: _dividerHeight, color: AppColors.divider),
                 SizedBox(
                   height: _timelineHeight,
@@ -518,11 +556,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                 ),
               ],
             ),
-            // ✅ Кнопка/круг: второй слой, центр ровно в центре зоны 120px
             Positioned(
               left: 0,
               right: 0,
-              bottom: _menuBottom, // = 81 (рассчитано из констант)
+              bottom: _menuBottom,
               child: Center(
                 child: RadialToolMenu(
                   radius: 120.0,

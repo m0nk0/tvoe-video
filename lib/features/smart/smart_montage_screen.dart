@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // ✅ НОВОЕ: для HapticFeedback
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
@@ -46,7 +47,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
   BeatAnalysis? _beats;
   bool _beatsLoading = false;
 
-  /// ✅ План клипа: стиль + (опционально) пересчёт длительностей под биты
   List<MontageFramePlan> get _plans {
     final base = SmartMontage.generate(
       analyses: _analyses,
@@ -60,7 +60,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     ];
   }
 
-  /// Каждый кадр = 2 бита музыки
   MontageFramePlan _withBeatDuration(
       MontageFramePlan p, int i, List<double> beats) {
     const k = 2;
@@ -93,9 +92,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     super.dispose();
   }
 
-  // ==========================================
-  // Анализ всех фото проекта
-  // ==========================================
   Future<void> _analyze() async {
     final paths = ref
         .read(currentProjectProvider)
@@ -114,8 +110,12 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
       if (!mounted) return;
       setState(() =>
           _progressText = 'Анализирую фото ${i + 1} из ${paths.length}...');
-      final a = await SmartAnalyzer.analyzePhoto(paths[i]);
-      results.add(a);
+      try {
+        final a = await SmartAnalyzer.analyzePhoto(paths[i]);
+        results.add(a);
+      } catch (e) {
+        print('⚠️ Пропущено фото $paths[i]: $e');
+      }
       if (!mounted) return;
       setState(() => _progress = (i + 1) / paths.length);
     }
@@ -131,9 +131,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     _autoPickMusic(detected);
   }
 
-  // ==========================================
-  // 🎵 Авто-подбор музыки по стилю
-  // ==========================================
   void _autoPickMusic(MontageStyle style) {
     final bundled = ref.read(bundledMusicProvider);
     final file = bundled.pickForStyle(style.name);
@@ -143,9 +140,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     }
   }
 
-  // ==========================================
-  // ⚡ Анализ битов выбранного трека
-  // ==========================================
   Future<void> _detectBeats(File file) async {
     setState(() {
       _beatsLoading = true;
@@ -159,9 +153,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     });
   }
 
-  // ==========================================
-  // ▶️ Превью трека
-  // ==========================================
   Future<void> _playPreview(String path) async {
     if (_playingPath == path &&
         _previewPlayer != null &&
@@ -187,9 +178,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     setState(() => _playingPath = null);
   }
 
-  // ==========================================
-  // 🎵 Выбор музыки (диалог)
-  // ==========================================
   Future<void> _openMusicPicker() async {
     _stopPreview();
     final picked = await showMusicPicker(context, ref);
@@ -200,46 +188,54 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
   }
 
   // ==========================================
-  // Применение плана к проекту
+  // ✅ ИСПРАВЛЕНО: пакетный режим для Undo
+  // Все изменения = ОДИН шаг Undo
   // ==========================================
   Future<void> _apply() async {
+    HapticFeedback.heavyImpact(); // ✅ Сильный отклик на массовую операцию
     final notifier = ref.read(currentProjectProvider.notifier);
     final photos = ref.read(currentProjectProvider).photos;
     final plans = _plans;
     final beatApplied =
         _beatSync && _beats != null && _beats!.isValid && _selectedMusic != null;
 
-    for (final plan in plans) {
-      final idx = photos.indexWhere((p) => p.imagePath == plan.imagePath);
-      if (idx < 0) continue;
+    // ✅ ИСПРАВЛЕНО: пакетный режим — всё = ОДИН шаг Undo
+    notifier.beginBatch();
+    try {
+      for (final plan in plans) {
+        final idx = photos.indexWhere((p) => p.imagePath == plan.imagePath);
+        if (idx < 0) continue;
 
-      notifier.updatePhotoFit(
-        index: idx,
-        fitMode: plan.fitMode,
-        scale: 1.0,
-        offsetX: plan.offsetX,
-        offsetY: plan.offsetY,
-        backgroundType: BackgroundType.blur,
-        backgroundColor: 0xFF000000,
-      );
+        notifier.updatePhotoFit(
+          index: idx,
+          fitMode: plan.fitMode,
+          scale: 1.0,
+          offsetX: plan.offsetX,
+          offsetY: plan.offsetY,
+          backgroundType: BackgroundType.blur,
+          backgroundColor: 0xFF000000,
+        );
 
-      notifier.updatePhotoDuration(idx, plan.durationMs);
-      notifier.updatePhotoFilter(idx, plan.filter);
-      notifier.updatePhotoTransition(idx, plan.transition);
-      notifier.updatePhotoEntranceAnimation(idx, plan.entrance);
-      notifier.updatePhotoEntranceDuration(idx, plan.entranceDurationMs);
-    }
+        notifier.updatePhotoDuration(idx, plan.durationMs);
+        notifier.updatePhotoFilter(idx, plan.filter);
+        notifier.updatePhotoTransition(idx, plan.transition);
+        notifier.updatePhotoEntranceAnimation(idx, plan.entrance);
+        notifier.updatePhotoEntranceDuration(idx, plan.entranceDurationMs);
+      }
 
-    if (_selectedMusic != null) {
-      final name = _musicDisplayName(_selectedMusic!);
-      final track = AudioTrack(
-        filePath: _selectedMusic!.path,
-        title: name,
-        artist:
-            BundledMusicService.isBundled(_selectedMusic!) ? 'Pixabay' : null,
-        isFromInternet: false,
-      );
-      notifier.setAudioTrack(track);
+      if (_selectedMusic != null) {
+        final name = _musicDisplayName(_selectedMusic!);
+        final track = AudioTrack(
+          filePath: _selectedMusic!.path,
+          title: name,
+          artist:
+              BundledMusicService.isBundled(_selectedMusic!) ? 'Pixabay' : null,
+          isFromInternet: false,
+        );
+        notifier.setAudioTrack(track);
+      }
+    } finally {
+      notifier.endBatch();
     }
 
     if (mounted) {
@@ -259,9 +255,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     }
   }
 
-  // ==========================================
-  // Вспомогательные
-  // ==========================================
   String _musicDisplayName(File f) {
     if (BundledMusicService.isBundled(f)) {
       return BundledMusicService.displayName(f);
@@ -269,7 +262,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     return MediaStorageService.displayName(f);
   }
 
-  /// ✅ Подпись чипа стиля (с эмодзи для 4 тематических)
   String _styleLabel(MontageStyle s) {
     switch (s) {
       case MontageStyle.auto:
@@ -347,7 +339,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              // ---- Выбор стиля ----
               Text(
                 'Стиль монтажа',
                 style: GoogleFonts.manrope(
@@ -377,6 +368,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                             : _styleLabel(s)),
                     selected: isSelected,
                     onSelected: (_) {
+                      HapticFeedback.selectionClick();
                       setState(() => _style = s);
                       final effective = s == MontageStyle.auto
                           ? (_detected ?? MontageStyle.family)
@@ -405,7 +397,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
 
               const SizedBox(height: 16),
 
-              // ---- Сводка анализа ----
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -426,7 +417,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
 
               const SizedBox(height: 16),
 
-              // 🎵 ---- Блок музыки ----
               _MusicBlock(
                 selectedMusic: _selectedMusic,
                 playingPath: _playingPath,
@@ -441,7 +431,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                     : false,
               ),
 
-              // ⚡ ---- Тумблер бит-синка ----
               if (_selectedMusic != null) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -490,7 +479,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
 
               const SizedBox(height: 16),
 
-              // ---- План клипа ----
               Text(
                 'План клипа',
                 style: GoogleFonts.manrope(
@@ -508,7 +496,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
           ),
         ),
 
-        // ---- Кнопка применения ----
         Container(
           color: AppColors.surface,
           padding: const EdgeInsets.all(16),
@@ -537,9 +524,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
   }
 }
 
-// ==========================================
-// 🎵 Блок музыки в умном монтаже
-// ==========================================
 class _MusicBlock extends StatelessWidget {
   final File? selectedMusic;
   final String? playingPath;
@@ -699,9 +683,6 @@ class _MusicBlock extends StatelessWidget {
   }
 }
 
-// ==========================================
-// Сводка-статистика
-// ==========================================
 class _Stat extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -725,9 +706,6 @@ class _Stat extends StatelessWidget {
   }
 }
 
-// ==========================================
-// Карточка кадра в плане
-// ==========================================
 class _PlanCard extends StatelessWidget {
   final int index;
   final MontageFramePlan plan;
@@ -801,9 +779,6 @@ class _PlanCard extends StatelessWidget {
   }
 }
 
-// ==========================================
-// 🎵 Диалог выбора музыки (с превью)
-// ==========================================
 Future<File?> showMusicPicker(BuildContext context, WidgetRef ref) async {
   return showDialog<File>(
     context: context,
