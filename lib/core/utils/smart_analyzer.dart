@@ -93,8 +93,73 @@ class SmartAnalyzer {
     ),
   );
 
-  /// Анализ одного фото
+  // ==========================================
+  // ✅ НОВОЕ: КЭШ результатов анализа
+  // ==========================================
+  static final Map<String, SmartPhotoAnalysis> _cache = {};
+  static final Map<String, Future<SmartPhotoAnalysis>> _inFlight = {};
+  static const int _maxCacheSize = 200;
+
+  /// Ключ кэша: путь + время изменения + размер файла.
+  /// Если фото изменилось — ключ другой — кэш не сработает.
+  static Future<String> _cacheKey(String path) async {
+    try {
+      final stat = await File(path).stat();
+      return '$path|${stat.modified.millisecondsSinceEpoch}|${stat.size}';
+    } catch (_) {
+      return '$path|unknown';
+    }
+  }
+
+  /// Публичный метод с кэшем и защитой от параллельных дублей
   static Future<SmartPhotoAnalysis> analyzePhoto(String imagePath) async {
+    final key = await _cacheKey(imagePath);
+
+    // 1. Уже проанализировано — возвращаем мгновенно
+    final cached = _cache[key];
+    if (cached != null) {
+      print('⚡ SmartAnalyzer: кэш для ${imagePath.split('/').last}');
+      return cached;
+    }
+
+    // 2. Анализ уже идёт в другом месте — ждём тот же Future
+    final inFlight = _inFlight[key];
+    if (inFlight != null) return inFlight;
+
+    // 3. Запускаем реальный анализ
+    final future = _analyzePhotoInternal(imagePath).then((result) {
+      _inFlight.remove(key);
+      _cache[key] = result;
+      _trimCache();
+      return result;
+    }).catchError((Object e) {
+      _inFlight.remove(key);
+      throw e;
+    });
+
+    _inFlight[key] = future;
+    return future;
+  }
+
+  /// Полная очистка кэша (для тестов или при нехватке памяти)
+  static void clearCache() {
+    _cache.clear();
+    _inFlight.clear();
+  }
+
+  /// Ограничение размера кэша (удаляем самые старые записи)
+  static void _trimCache() {
+    if (_cache.length <= _maxCacheSize) return;
+    final excess = _cache.length - _maxCacheSize;
+    for (final oldKey in _cache.keys.take(excess).toList()) {
+      _cache.remove(oldKey);
+    }
+  }
+
+  // ==========================================
+  // Реальный анализ фото (без кэша)
+  // ==========================================
+  static Future<SmartPhotoAnalysis> _analyzePhotoInternal(String imagePath) async {
     try {
       // 1. Читаем байты для анализа цвета
       final bytes = await _readImageBytes(imagePath);
@@ -268,7 +333,7 @@ Future<_ColorAnalysis> _analyzeColors(ui.Image image) async {
       if (h > 180 && h < 270 && s > 0.3) coolPixels++;
       // Яркие: высокая насыщенность
       if (s > 0.6) vibrantPixels++;
-      // ✅ Приглушённые: ужесточённый порог (реже срабатывает)
+      // Приглушённые: ужесточённый порог (реже срабатывает)
       if (s < 0.25 && l > 0.35 && l < 0.65) mutedPixels++;
 
       count++;
@@ -305,7 +370,6 @@ Future<_ColorAnalysis> _analyzeColors(ui.Image image) async {
       } else if (coolRatio > warmRatio && coolRatio > mutedRatio) {
         mood = PhotoMood.cool;
       } else if (mutedRatio > 0.55) {
-        // ✅ Ужесточённый порог (было 0.3)
         mood = PhotoMood.muted;
       } else {
         mood = PhotoMood.neutral;

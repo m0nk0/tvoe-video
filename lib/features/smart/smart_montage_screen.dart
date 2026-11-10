@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // ✅ НОВОЕ: для HapticFeedback
+import 'package:flutter/services.dart'; // ✅ Для HapticFeedback
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
@@ -17,10 +17,6 @@ import '../../data/providers/project_provider.dart';
 import '../../data/services/bundled_music_service.dart';
 import '../../data/services/media_storage_service.dart';
 
-// ==========================================
-// Экран умного монтажа: ИИ собирает клип
-// ✅ 8 стилей + ✅ синхронизация кадров по битам музыки
-// ==========================================
 class SmartMontageScreen extends ConsumerStatefulWidget {
   const SmartMontageScreen({super.key});
 
@@ -37,12 +33,10 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
   MontageStyle _style = MontageStyle.auto;
   MontageStyle? _detected;
 
-  // 🎵 Музыка
   File? _selectedMusic;
   AudioPlayer? _previewPlayer;
   String? _playingPath;
 
-  // ⚡ Бит-синк
   bool _beatSync = true;
   BeatAnalysis? _beats;
   bool _beatsLoading = false;
@@ -114,7 +108,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
         final a = await SmartAnalyzer.analyzePhoto(paths[i]);
         results.add(a);
       } catch (e) {
-        print('⚠️ Пропущено фото $paths[i]: $e');
+        print('⚠️ Пропущено фото ${paths[i]}: $e');
       }
       if (!mounted) return;
       setState(() => _progress = (i + 1) / paths.length);
@@ -187,19 +181,14 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     }
   }
 
-  // ==========================================
-  // ✅ ИСПРАВЛЕНО: пакетный режим для Undo
-  // Все изменения = ОДИН шаг Undo
-  // ==========================================
   Future<void> _apply() async {
-    HapticFeedback.heavyImpact(); // ✅ Сильный отклик на массовую операцию
+    HapticFeedback.heavyImpact();
     final notifier = ref.read(currentProjectProvider.notifier);
     final photos = ref.read(currentProjectProvider).photos;
     final plans = _plans;
     final beatApplied =
         _beatSync && _beats != null && _beats!.isValid && _selectedMusic != null;
 
-    // ✅ ИСПРАВЛЕНО: пакетный режим — всё = ОДИН шаг Undo
     notifier.beginBatch();
     try {
       for (final plan in plans) {
@@ -264,24 +253,15 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
 
   String _styleLabel(MontageStyle s) {
     switch (s) {
-      case MontageStyle.auto:
-        return 'Авто';
-      case MontageStyle.family:
-        return 'Семья';
-      case MontageStyle.travel:
-        return 'Путешествие';
-      case MontageStyle.party:
-        return 'Вечеринка';
-      case MontageStyle.romance:
-        return 'Романтика';
-      case MontageStyle.birthday:
-        return '🎂 День рождения';
-      case MontageStyle.wedding:
-        return '💍 Свадьба';
-      case MontageStyle.newyear:
-        return '🎄 Новый год';
-      case MontageStyle.nostalgia:
-        return '📼 Ностальгия';
+      case MontageStyle.auto: return 'Авто';
+      case MontageStyle.family: return 'Семья';
+      case MontageStyle.travel: return 'Путешествие';
+      case MontageStyle.party: return 'Вечеринка';
+      case MontageStyle.romance: return 'Романтика';
+      case MontageStyle.birthday: return '🎂 День рождения';
+      case MontageStyle.wedding: return '💍 Свадьба';
+      case MontageStyle.newyear: return '🎄 Новый год';
+      case MontageStyle.nostalgia: return '📼 Ностальгия';
     }
   }
 
@@ -296,8 +276,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
         foregroundColor: AppColors.textPrimary,
         title: Text(
           'Умный монтаж',
-          style: GoogleFonts.unbounded(
-              fontSize: 18, fontWeight: FontWeight.w700),
+          style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700),
         ),
       ),
       body: _analyzing
@@ -307,13 +286,11 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const CircularProgressIndicator(
-                        color: AppColors.primary),
+                    const CircularProgressIndicator(color: AppColors.primary),
                     const SizedBox(height: 24),
                     Text(
                       _progressText,
-                      style: GoogleFonts.manrope(
-                          fontSize: 14, color: AppColors.textSecondary),
+                      style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textSecondary),
                     ),
                     const SizedBox(height: 12),
                     LinearProgressIndicator(
@@ -341,19 +318,12 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
             children: [
               Text(
                 'Стиль монтажа',
-                style: GoogleFonts.manrope(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary),
+                style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 4),
               Text(
                 'Авто-детект определяет 4 базовых стиля. Тематические — выбирайте вручную.',
-                style: GoogleFonts.manrope(
-                  fontSize: 11,
-                  color: AppColors.textMuted,
-                  height: 1.3,
-                ),
+                style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted, height: 1.3),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -380,17 +350,12 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                     labelStyle: GoogleFonts.manrope(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: isSelected
-                          ? Colors.white
-                          : AppColors.textSecondary,
+                      color: isSelected ? Colors.white : AppColors.textSecondary,
                     ),
                     side: BorderSide(
-                      color: isSelected
-                          ? AppColors.primary
-                          : AppColors.primary.withValues(alpha: 0.3),
+                      color: isSelected ? AppColors.primary : AppColors.primary.withValues(alpha: 0.3),
                     ),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   );
                 }).toList(),
               ),
@@ -402,8 +367,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                 decoration: BoxDecoration(
                   color: AppColors.surface,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color: AppColors.primary.withValues(alpha: 0.3)),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -423,56 +387,60 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                 onPlay: _playPreview,
                 onStop: _stopPreview,
                 onChange: _openMusicPicker,
-                displayName: _selectedMusic != null
-                    ? _musicDisplayName(_selectedMusic!)
-                    : null,
-                isBundled: _selectedMusic != null
-                    ? BundledMusicService.isBundled(_selectedMusic!)
-                    : false,
+                displayName: _selectedMusic != null ? _musicDisplayName(_selectedMusic!) : null,
+                isBundled: _selectedMusic != null ? BundledMusicService.isBundled(_selectedMusic!) : false,
               ),
 
               if (_selectedMusic != null) ...[
                 const SizedBox(height: 8),
+                // ✅ ИСПРАВЛЕНО: Замена SwitchListTile на Row + Switch для устранения предупреждения Flutter
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
                     color: AppColors.surface,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: AppColors.primary.withValues(alpha: 0.3)),
+                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
                   ),
-                  child: SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    value: _beatSync,
-                    activeColor: AppColors.primary,
-                    onChanged: (v) {
-                      setState(() => _beatSync = v);
-                      if (v && _selectedMusic != null && _beats == null) {
-                        _detectBeats(_selectedMusic!);
-                      }
-                    },
-                    title: Text(
-                      '⚡ Синхронизировать по битам',
-                      style: GoogleFonts.manrope(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '⚡ Синхронизировать по битам',
+                              style: GoogleFonts.manrope(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _beatsLoading
+                                  ? 'Анализирую биты…'
+                                  : (_beats != null && _beats!.isValid
+                                      ? 'Кадр = 2 бита • BPM ~${_beats!.bpm.round()}'
+                                      : 'Биты не найдены — темп по стилю'),
+                              style: GoogleFonts.manrope(
+                                fontSize: 11,
+                                color: _beats != null && _beats!.isValid ? AppColors.primary : AppColors.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    subtitle: Text(
-                      _beatsLoading
-                          ? 'Анализирую биты…'
-                          : (_beats != null && _beats!.isValid
-                              ? 'Кадр = 2 бита • BPM ~${_beats!.bpm.round()}'
-                              : 'Биты не найдены — темп по стилю'),
-                      style: GoogleFonts.manrope(
-                        fontSize: 11,
-                        color: _beats != null && _beats!.isValid
-                            ? AppColors.primary
-                            : AppColors.textMuted,
+                      Switch.adaptive(
+                        value: _beatSync,
+                        activeColor: AppColors.primary,
+                        onChanged: (v) {
+                          setState(() => _beatSync = v);
+                          if (v && _selectedMusic != null && _beats == null) {
+                            _detectBeats(_selectedMusic!);
+                          }
+                        },
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ],
@@ -481,10 +449,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
 
               Text(
                 'План клипа',
-                style: GoogleFonts.manrope(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary),
+                style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
               ),
               const SizedBox(height: 8),
               ...plans.asMap().entries.map((e) {
@@ -507,14 +472,12 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               icon: const Icon(Icons.auto_awesome, size: 20),
               label: Text(
                 'Применить умный монтаж',
-                style: GoogleFonts.manrope(
-                    fontSize: 15, fontWeight: FontWeight.w700),
+                style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -545,8 +508,7 @@ class _MusicBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isPlaying =
-        selectedMusic != null && playingPath == selectedMusic!.path;
+    final isPlaying = selectedMusic != null && playingPath == selectedMusic!.path;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -562,22 +524,14 @@ class _MusicBlock extends StatelessWidget {
             children: [
               Text(
                 '🎵 Музыка',
-                style: GoogleFonts.manrope(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
-                ),
+                style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textSecondary),
               ),
               const Spacer(),
               GestureDetector(
                 onTap: onChange,
                 child: Text(
                   selectedMusic != null ? 'Сменить' : 'Выбрать',
-                  style: GoogleFonts.manrope(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.primary,
-                  ),
+                  style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary),
                 ),
               ),
             ],
@@ -592,15 +546,11 @@ class _MusicBlock extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.music_off,
-                      size: 20, color: AppColors.textMuted),
+                  const Icon(Icons.music_off, size: 20, color: AppColors.textMuted),
                   const SizedBox(width: 8),
                   Text(
                     'Без музыки',
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      color: AppColors.textMuted,
-                    ),
+                    style: GoogleFonts.manrope(fontSize: 13, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -615,8 +565,7 @@ class _MusicBlock extends StatelessWidget {
               child: Row(
                 children: [
                   GestureDetector(
-                    onTap: () =>
-                        isPlaying ? onStop() : onPlay(selectedMusic!.path),
+                    onTap: () => isPlaying ? onStop() : onPlay(selectedMusic!.path),
                     child: Container(
                       width: 36,
                       height: 36,
@@ -638,40 +587,28 @@ class _MusicBlock extends StatelessWidget {
                       children: [
                         Text(
                           displayName ?? '',
-                          style: GoogleFonts.manrope(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary,
-                          ),
+                          style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           isBundled ? '✨ Встроенный трек' : 'Ваш трек',
-                          style: GoogleFonts.manrope(
-                            fontSize: 11,
-                            color: AppColors.textMuted,
-                          ),
+                          style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
                         ),
                       ],
                     ),
                   ),
                   if (isBundled)
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: AppColors.primary.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
                         'AI',
-                        style: GoogleFonts.jetBrainsMono(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary,
-                        ),
+                        style: GoogleFonts.jetBrainsMono(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.primary),
                       ),
                     ),
                 ],
@@ -698,8 +635,7 @@ class _Stat extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           label,
-          style: GoogleFonts.jetBrainsMono(
-              fontSize: 12, color: AppColors.textPrimary),
+          style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.textPrimary),
         ),
       ],
     );
@@ -720,8 +656,7 @@ class _PlanCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -730,19 +665,16 @@ class _PlanCard extends StatelessWidget {
             height: 56,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.3)),
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: ColorFiltered(
-                colorFilter:
-                    ColorFilter.matrix(FilterPresets.matrix(plan.filter)),
+                colorFilter: ColorFilter.matrix(FilterPresets.matrix(plan.filter)),
                 child: Image.file(
                   File(plan.imagePath),
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      const Icon(Icons.broken_image, size: 20),
+                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 20),
                 ),
               ),
             ),
@@ -754,25 +686,17 @@ class _PlanCard extends StatelessWidget {
               children: [
                 Text(
                   'Кадр ${index + 1} • ${(plan.durationMs / 1000).toStringAsFixed(1)}s',
-                  style: GoogleFonts.jetBrainsMono(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary),
+                  style: GoogleFonts.jetBrainsMono(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '${TransitionPresets.label(plan.transition)} • ${FilterPresets.label(plan.filter)}',
-                  style: GoogleFonts.manrope(
-                      fontSize: 11, color: AppColors.textMuted),
+                  style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
                 ),
               ],
             ),
           ),
-          const Icon(
-            Icons.movie_filter,
-            size: 18,
-            color: AppColors.textMuted,
-          ),
+          const Icon(Icons.movie_filter, size: 18, color: AppColors.textMuted),
         ],
       ),
     );
@@ -826,10 +750,8 @@ class _MusicPickerDialogState extends State<_MusicPickerDialog> {
     final storage = widget.ref.watch(mediaStorageProvider);
     final allMusic = storage.listMusic();
 
-    final bundled =
-        allMusic.where((f) => BundledMusicService.isBundled(f)).toList();
-    final user =
-        allMusic.where((f) => !BundledMusicService.isBundled(f)).toList();
+    final bundled = allMusic.where((f) => BundledMusicService.isBundled(f)).toList();
+    final user = allMusic.where((f) => !BundledMusicService.isBundled(f)).toList();
 
     return Dialog(
       backgroundColor: AppColors.surface,
@@ -851,16 +773,11 @@ class _MusicPickerDialogState extends State<_MusicPickerDialog> {
                   const SizedBox(width: 8),
                   Text(
                     'Выберите музыку',
-                    style: GoogleFonts.unbounded(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
+                    style: GoogleFonts.unbounded(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close,
-                        color: AppColors.textMuted, size: 22),
+                    icon: const Icon(Icons.close, color: AppColors.textMuted, size: 22),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -872,11 +789,7 @@ class _MusicPickerDialogState extends State<_MusicPickerDialog> {
                     if (bundled.isNotEmpty) ...[
                       Text(
                         '✨ Встроенные треки',
-                        style: GoogleFonts.manrope(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textMuted,
-                        ),
+                        style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted),
                       ),
                       const SizedBox(height: 6),
                       ...bundled.map((f) => _MusicTile(
@@ -892,11 +805,7 @@ class _MusicPickerDialogState extends State<_MusicPickerDialog> {
                     if (user.isNotEmpty) ...[
                       Text(
                         '📁 Ваша музыка',
-                        style: GoogleFonts.manrope(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textMuted,
-                        ),
+                        style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textMuted),
                       ),
                       const SizedBox(height: 6),
                       ...user.map((f) => _MusicTile(
@@ -912,13 +821,11 @@ class _MusicPickerDialogState extends State<_MusicPickerDialog> {
                           padding: const EdgeInsets.all(32),
                           child: Column(
                             children: [
-                              const Icon(Icons.music_off,
-                                  size: 48, color: AppColors.textMuted),
+                              const Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
                               const SizedBox(height: 8),
                               Text(
                                 'Музыки пока нет',
-                                style: GoogleFonts.manrope(
-                                    color: AppColors.textMuted),
+                                style: GoogleFonts.manrope(color: AppColors.textMuted),
                               ),
                             ],
                           ),
@@ -934,14 +841,12 @@ class _MusicPickerDialogState extends State<_MusicPickerDialog> {
                   onPressed: () => Navigator.pop(context, null),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.textMuted,
-                    side: BorderSide(
-                        color: AppColors.primary.withValues(alpha: 0.3)),
+                    side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                   child: Text(
                     'Без музыки',
-                    style: GoogleFonts.manrope(
-                        fontSize: 14, fontWeight: FontWeight.w600),
+                    style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -978,9 +883,7 @@ class _MusicTile extends StatelessWidget {
         color: AppColors.surfaceLight,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isPlaying
-              ? AppColors.primary
-              : AppColors.primary.withValues(alpha: 0.1),
+          color: isPlaying ? AppColors.primary : AppColors.primary.withValues(alpha: 0.1),
         ),
       ),
       child: Row(
@@ -1010,11 +913,7 @@ class _MusicTile extends StatelessWidget {
                   Expanded(
                     child: Text(
                       displayName,
-                      style: GoogleFonts.manrope(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
+                      style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1022,16 +921,14 @@ class _MusicTile extends StatelessWidget {
                   if (badge != null)
                     Container(
                       margin: const EdgeInsets.only(left: 6),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: AppColors.primary.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         badge!,
-                        style: GoogleFonts.jetBrainsMono(
-                            fontSize: 10, color: AppColors.primary),
+                        style: GoogleFonts.jetBrainsMono(fontSize: 10, color: AppColors.primary),
                       ),
                     ),
                 ],
@@ -1039,8 +936,7 @@ class _MusicTile extends StatelessWidget {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.check_circle_outline,
-                color: AppColors.primary, size: 22),
+            icon: const Icon(Icons.check_circle_outline, color: AppColors.primary, size: 22),
             onPressed: onSelect,
           ),
         ],

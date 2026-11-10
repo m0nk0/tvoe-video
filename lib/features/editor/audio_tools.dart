@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // ✅ Добавлено для HapticFeedback
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
@@ -94,6 +95,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: () {
+                    HapticFeedback.lightImpact();
                     Navigator.pop(sheetContext);
                     _showDeviceMusicSheet(context, ref);
                   },
@@ -109,11 +111,11 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
 
               const SizedBox(height: 12),
 
-              // ✅ ИЗ МЕДИАТЕКИ (встроенные + импортированные треки)
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: () {
+                    HapticFeedback.lightImpact();
                     Navigator.pop(sheetContext);
                     _showMediaLibraryMusicSheet(context, ref);
                   },
@@ -168,7 +170,6 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
 
               const SizedBox(height: 12),
 
-              // ⚡ СИНХРОНИЗАЦИЯ ПО БИТАМ
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -227,7 +228,6 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
       );
     },
   ).whenComplete(() {
-    // ✅ Останавливаем превью-плеер ТОЛЬКО если превью редактора не играет
     if (!ref.read(isPlayingProvider)) {
       ref.read(audioPlayerProvider).stop();
       ref.read(isAudioPlayingProvider.notifier).state = false;
@@ -329,42 +329,9 @@ Future<void> _showMediaLibraryMusicSheet(
                         final file = files[index];
                         final name = MediaStorageService.displayName(file);
                         final isBundled = BundledMusicService.isBundled(file);
-                        return ListTile(
-                          leading: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Icon(
-                              isBundled
-                                  ? Icons.auto_awesome
-                                  : Icons.music_note,
-                              color: AppColors.primary,
-                            ),
-                          ),
-                          title: Text(
-                            name,
-                            style: GoogleFonts.manrope(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            isBundled
-                                ? '✨ Встроенный'
-                                : MediaStorageService.formatBytes(file),
-                            style: GoogleFonts.manrope(
-                              fontSize: 11,
-                              color: AppColors.textMuted,
-                            ),
-                          ),
-                          trailing: const Icon(Icons.chevron_right,
-                              color: AppColors.textMuted),
+                        
+                        // ✅ ИСПРАВЛЕНО: Замена ListTile на InkWell + Padding для корректного ripple-эффекта
+                        return InkWell(
                           onTap: () {
                             Navigator.pop(sheetContext);
                             final track = AudioTrack(
@@ -374,6 +341,50 @@ Future<void> _showMediaLibraryMusicSheet(
                             );
                             _showAudioPreviewDialog(context, ref, track);
                           },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    isBundled ? Icons.auto_awesome : Icons.music_note,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name,
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        isBundled ? '✨ Встроенный' : MediaStorageService.formatBytes(file),
+                                        style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                              ],
+                            ),
+                          ),
                         );
                       },
                     ),
@@ -387,7 +398,6 @@ Future<void> _showMediaLibraryMusicSheet(
 
 // ==========================================
 // ⚡ Синхронизация длительностей кадров по битам музыки
-// Каждый кадр = 2 бита
 // ==========================================
 Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   final project = ref.read(currentProjectProvider);
@@ -434,29 +444,37 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   }
 
   final notifier = ref.read(currentProjectProvider.notifier);
-  const beatsPerPhoto = 2;
-  final beats = analysis.beats;
-  int synced = 0;
+  
+  // ✅ ИСПРАВЛЕНО: Пакетный режим для Undo (всё = 1 шаг)
+  notifier.beginBatch();
+  try {
+    const beatsPerPhoto = 2;
+    final beats = analysis.beats;
+    int synced = 0;
 
-  for (int i = 0; i < project.photos.length; i++) {
-    final startIdx = i * beatsPerPhoto;
-    if (startIdx >= beats.length - 1) break;
-    final endIdx = math.min((i + 1) * beatsPerPhoto, beats.length - 1);
-    double sec = beats[endIdx] - beats[startIdx];
-    sec = sec.clamp(0.8, 6.0);
-    notifier.updatePhotoDuration(i, (sec * 1000).round());
-    synced++;
-  }
+    for (int i = 0; i < project.photos.length; i++) {
+      final startIdx = i * beatsPerPhoto;
+      if (startIdx >= beats.length - 1) break;
+      final endIdx = math.min((i + 1) * beatsPerPhoto, beats.length - 1);
+      double sec = beats[endIdx] - beats[startIdx];
+      sec = sec.clamp(0.8, 6.0);
+      notifier.updatePhotoDuration(i, (sec * 1000).round());
+      synced++;
+    }
 
-  if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-            '⚡ Синхронизировано кадров: $synced • BPM ~${analysis.bpm.round()}'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+    if (context.mounted) {
+      HapticFeedback.heavyImpact(); // ✅ Тактильный отклик
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              '⚡ Синхронизировано кадров: $synced • BPM ~${analysis.bpm.round()}'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  } finally {
+    notifier.endBatch();
   }
 }
 
@@ -491,7 +509,7 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
   final tracks = granted ? await scanDeviceMusic() : <AudioTrack>[];
 
   if (!context.mounted) return;
-  Navigator.pop(context); // закрыть индикатор
+  Navigator.pop(context);
 
   if (!granted) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -604,42 +622,59 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
                       itemBuilder: (context, index) {
                         final track = tracks[index];
                         final folder = _folderOf(track.filePath);
-                        return ListTile(
-                          leading: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(Icons.music_note,
-                                color: AppColors.primary),
-                          ),
-                          title: Text(
-                            track.title,
-                            style: GoogleFonts.manrope(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            folder,
-                            style: GoogleFonts.manrope(
-                              fontSize: 11,
-                              color: AppColors.textMuted,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: const Icon(Icons.chevron_right,
-                              color: AppColors.textMuted),
+                        
+                        // ✅ ИСПРАВЛЕНО: Замена ListTile на InkWell + Padding
+                        return InkWell(
                           onTap: () {
                             Navigator.pop(sheetContext);
                             _showAudioPreviewDialog(context, ref, track);
                           },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.music_note, color: AppColors.primary),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        track.title,
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        folder,
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                              ],
+                            ),
+                          ),
                         );
                       },
                     ),
@@ -947,8 +982,7 @@ void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
 }
 
 // ==========================================
-// ✅ Текущий трек проекта на ГЛОБАЛЬНОМ плеере:
-// живой прогресс-бар + play/pause + громкость + задержка
+// ✅ Текущий трек проекта на ГЛОБАЛЬНОМ плеере
 // ==========================================
 class _CurrentTrackWidget extends ConsumerWidget {
   const _CurrentTrackWidget();
@@ -972,7 +1006,6 @@ class _CurrentTrackWidget extends ConsumerWidget {
       );
     }
 
-    // ✅ Максимальная задержка = длительность видео (или 30 сек, если кадров нет)
     final totalSec = project.totalDurationMs / 1000.0;
     final maxStart = totalSec > 0 ? totalSec : 30.0;
     final clampedStart = track.startTime.clamp(0.0, maxStart);
@@ -987,7 +1020,6 @@ class _CurrentTrackWidget extends ConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ---- Заголовок + play/pause + корзина ----
           Row(
             children: [
               const Icon(Icons.music_note, color: AppColors.primary, size: 28),
@@ -1004,7 +1036,6 @@ class _CurrentTrackWidget extends ConsumerWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // ✅ КРУПНАЯ КНОПКА PLAY/PAUSE (глобальный плеер)
               GestureDetector(
                 onTap: () async {
                   if (isPlaying) {
@@ -1044,9 +1075,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
                 onPressed: () async {
                   await player.stop();
                   ref.read(isAudioPlayingProvider.notifier).state = false;
-                  ref
-                      .read(currentProjectProvider.notifier)
-                      .removeAudioTrack();
+                  ref.read(currentProjectProvider.notifier).removeAudioTrack();
                 },
               ),
             ],
@@ -1054,7 +1083,6 @@ class _CurrentTrackWidget extends ConsumerWidget {
 
           const SizedBox(height: 12),
 
-          // ✅ ЖИВОЙ ПРОГРЕСС-БАР глобального плеера
           StreamBuilder<Duration>(
             stream: player.positionStream,
             builder: (context, posSnap) {
@@ -1080,7 +1108,6 @@ class _CurrentTrackWidget extends ConsumerWidget {
 
           const SizedBox(height: 8),
 
-          // ---- 🔊 Громкость ----
           Row(
             children: [
               const Icon(Icons.volume_down, color: AppColors.textMuted, size: 20),
@@ -1092,9 +1119,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
                   activeColor: AppColors.primary,
                   inactiveColor: AppColors.surfaceLight,
                   onChanged: (value) {
-                    ref
-                        .read(currentProjectProvider.notifier)
-                        .updateAudioVolume(value);
+                    ref.read(currentProjectProvider.notifier).updateAudioVolume(value);
                     player.setVolume(value);
                   },
                 ),
@@ -1115,14 +1140,12 @@ class _CurrentTrackWidget extends ConsumerWidget {
             ],
           ),
 
-          // ---- ⏱ Задержка старта ----
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.schedule,
-                      color: AppColors.textMuted, size: 18),
+                  const Icon(Icons.schedule, color: AppColors.textMuted, size: 18),
                   const SizedBox(width: 6),
                   Text(
                     'Задержка старта',
@@ -1162,9 +1185,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
             activeColor: AppColors.primary,
             inactiveColor: AppColors.surfaceLight,
             onChanged: (value) {
-              ref
-                  .read(currentProjectProvider.notifier)
-                  .updateAudioStartTime(value);
+              ref.read(currentProjectProvider.notifier).updateAudioStartTime(value);
             },
           ),
         ],
@@ -1306,41 +1327,57 @@ Future<void> showDeviceMusicBrowser(
                       itemBuilder: (context, index) {
                         final track = tracks[index];
                         final folder = _folderOf(track.filePath);
-                        return ListTile(
-                          leading: Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(Icons.music_note,
-                                color: AppColors.primary),
-                          ),
-                          title: Text(
-                            track.title,
-                            style: GoogleFonts.manrope(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textPrimary,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            folder,
-                            style: GoogleFonts.manrope(
-                              fontSize: 11,
-                              color: AppColors.textMuted,
-                            ),
-                          ),
-                          trailing: const Icon(Icons.chevron_right,
-                              color: AppColors.textMuted),
+                        
+                        // ✅ ИСПРАВЛЕНО: Замена ListTile на InkWell + Padding
+                        return InkWell(
                           onTap: () async {
                             Navigator.pop(sheetContext);
-                            await _pickTrack(
-                                context, ref, track, importOnly);
+                            await _pickTrack(context, ref, track, importOnly);
                           },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.music_note, color: AppColors.primary),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        track.title,
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        folder,
+                                        style: GoogleFonts.manrope(
+                                          fontSize: 11,
+                                          color: AppColors.textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                              ],
+                            ),
+                          ),
                         );
                       },
                     ),
@@ -1428,6 +1465,7 @@ Future<void> _pickTrack(BuildContext context, WidgetRef ref,
             if (importOnly) {
               if (dialogContext.mounted) Navigator.pop(dialogContext);
               if (context.mounted) {
+                HapticFeedback.mediumImpact();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text('🎵 «${stored.title}» добавлен в медиатеку'),

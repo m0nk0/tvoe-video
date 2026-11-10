@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 // ==========================================
 // Детектор битов музыки через FFmpeg (RMS-пики)
+// ✅ С кэшированием результатов
 // ==========================================
 
 class BeatAnalysis {
@@ -32,8 +33,61 @@ class BeatDetector {
   /// Чувствительность: пик должен превышать локальную среднюю в N раз
   static const double _sensitivity = 1.4;
 
-  /// Анализ трека: возвращает времена ударов и BPM
+  // ==========================================
+  // ✅ НОВОЕ: КЭШ результатов анализа битов
+  // ==========================================
+  static final Map<String, BeatAnalysis> _cache = {};
+  static final Map<String, Future<BeatAnalysis>> _inFlight = {};
+
+  /// Ключ кэша: путь + время изменения + размер файла
+  static Future<String> _cacheKey(String path) async {
+    try {
+      final stat = await File(path).stat();
+      return '$path|${stat.modified.millisecondsSinceEpoch}|${stat.size}';
+    } catch (_) {
+      return '$path|unknown';
+    }
+  }
+
+  /// Публичный метод с кэшем и защитой от параллельных дублей
   static Future<BeatAnalysis> detectBeats(String audioPath) async {
+    final key = await _cacheKey(audioPath);
+
+    // 1. Уже проанализировано — возвращаем мгновенно
+    final cached = _cache[key];
+    if (cached != null) {
+      print('⚡ BeatDetector: кэш для ${audioPath.split('/').last} (${cached.beats.length} битов, BPM ~${cached.bpm.round()})');
+      return cached;
+    }
+
+    // 2. Анализ уже идёт в другом месте — ждём тот же Future
+    final inFlight = _inFlight[key];
+    if (inFlight != null) return inFlight;
+
+    // 3. Запускаем реальный анализ
+    final future = _detectBeatsInternal(audioPath).then((result) {
+      _inFlight.remove(key);
+      _cache[key] = result;
+      return result;
+    }).catchError((Object e) {
+      _inFlight.remove(key);
+      throw e;
+    });
+
+    _inFlight[key] = future;
+    return future;
+  }
+
+  /// Полная очистка кэша (для тестов или при нехватке памяти)
+  static void clearCache() {
+    _cache.clear();
+    _inFlight.clear();
+  }
+
+  // ==========================================
+  // Реальный анализ трека (без кэша)
+  // ==========================================
+  static Future<BeatAnalysis> _detectBeatsInternal(String audioPath) async {
     try {
       final dir = await getTemporaryDirectory();
       final outFile = File(
