@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // ✅ НОВОЕ: для HapticFeedback
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -43,8 +43,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   bool _mediaLibraryOpen = false;
   int? _pendingFormatId;
   double _lastPlayheadMs = 0;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // ✅ КОНСТАНТЫ ГЕОМЕТРИИ (никогда не собьются)
   static const double _timelineHeight = 170;
   static const double _dividerHeight = 1;
   static const double _menuZoneHeight = 120;
@@ -67,7 +67,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     super.dispose();
   }
 
-  // ✅ АВТОСОХРАНЕНИЕ при сворачивании/закрытии
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
@@ -105,7 +104,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         await player.setFilePath(track.filePath);
         await player.setVolume(track.volume);
       } catch (e) {
-        print('⚠️ Не удалось загрузить трек: $e');
+        print('️ Не удалось загрузить трек: $e');
       }
     }
   }
@@ -157,16 +156,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     final project = ref.read(currentProjectProvider);
     final hasContent = project.photos.isNotEmpty || project.texts.isNotEmpty || project.audioTrack != null;
 
-    if (!hasContent) {
-      return; // Пустой проект не сохраняем
-    }
+    if (!hasContent) return;
 
     try {
       await ref.read(projectRepositoryProvider).saveProject(project);
       ref.read(projectsProvider.notifier).refresh();
 
       if (showSnackBar && mounted) {
-        HapticFeedback.mediumImpact(); // ✅ Тактильный отклик на успех
+        HapticFeedback.mediumImpact();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Проект сохранён'), backgroundColor: Colors.green, duration: Duration(seconds: 1)),
         );
@@ -188,8 +185,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     if (mounted) Navigator.of(context).pop();
   }
 
+  // ✅ НОВОЕ: Открытие гамбургер-меню
+  void _openMenu() {
+    HapticFeedback.lightImpact();
+    _scaffoldKey.currentState?.openDrawer();
+  }
+
   void _showPhotoSourceSheet() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     _pauseAudio();
     showModalBottomSheet(
       context: context,
@@ -234,7 +237,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openMediaLibraryForPhotos() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     _pauseAudio();
     _mediaLibraryOpen = true;
     final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
@@ -263,7 +266,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openMediaLibrary() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     _pauseAudio();
     _mediaLibraryOpen = true;
     final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
@@ -295,7 +298,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openCropEditor() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
@@ -306,7 +309,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openEffects() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
@@ -317,7 +320,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openTransitions() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     final selectedIndex = ref.read(selectedPhotoIndexProvider);
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isNotEmpty && selectedIndex < photos.length) {
@@ -328,17 +331,17 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openOverlays() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     showOverlaysSheet(context, ref);
   }
 
   void _openLiveMotion() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     showLiveMotionSheet(context, ref);
   }
 
   void _openHarmonize() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
@@ -375,7 +378,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                 if (mounted) {
                   Navigator.pop(context);
                   ref.read(currentProjectProvider.notifier).applyHarmonizationMatrices(matrices);
-                  HapticFeedback.heavyImpact(); // ✅ Сильный отклик на AI-операцию
+                  HapticFeedback.heavyImpact();
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Фото гармонизированы!'), backgroundColor: Colors.green));
                 }
               } catch (e) {
@@ -393,7 +396,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   }
 
   void _openSmartMontage() {
-    HapticFeedback.lightImpact(); // ✅
+    HapticFeedback.lightImpact();
     final photos = ref.read(currentProjectProvider).photos;
     if (photos.isEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сначала добавьте фото на таймлайн'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)));
@@ -475,7 +478,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     });
 
     final project = ref.watch(currentProjectProvider);
-    // ✅ НОВОЕ: состояние Undo/Redo (build пересобирается при каждом изменении state)
     final notifier = ref.read(currentProjectProvider.notifier);
     final canUndo = notifier.canUndo;
     final canRedo = notifier.canRedo;
@@ -487,54 +489,161 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         _saveAndPop();
       },
       child: Scaffold(
+        key: _scaffoldKey,
         backgroundColor: AppColors.background,
+        // ✅ НОВОЕ: Гамбургер-меню (Drawer)
+        drawer: Drawer(
+          backgroundColor: AppColors.surface,
+          child: SafeArea(
+            child: Column(
+              children: [
+                // Заголовок меню
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.menu, color: AppColors.textPrimary, size: 24),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Меню',
+                        style: GoogleFonts.unbounded(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                
+                // Пункты меню
+                Expanded(
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      // ← Назад (сохранить и выйти)
+                      ListTile(
+                        leading: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
+                        title: Text('Назад', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
+                        subtitle: Text('Сохранить и выйти', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
+                        onTap: () {
+                          Navigator.pop(context); // закрыть drawer
+                          _saveAndPop();
+                        },
+                      ),
+                      
+                      // ↩️ Отменить (Undo)
+                      Consumer(
+                        builder: (context, ref, child) {
+                          final canUndo = ref.watch(currentProjectProvider.notifier).canUndo;
+                          return ListTile(
+                            leading: Icon(Icons.undo, color: canUndo ? AppColors.primary : AppColors.textMuted),
+                            title: Text('Отменить', style: GoogleFonts.manrope(fontSize: 16, color: canUndo ? AppColors.textPrimary : AppColors.textMuted)),
+                            enabled: canUndo,
+                            onTap: () {
+                              Navigator.pop(context);
+                              if (canUndo) {
+                                HapticFeedback.lightImpact();
+                                ref.read(currentProjectProvider.notifier).undo();
+                              }
+                            },
+                          );
+                        },
+                      ),
+                      
+                      // ↪️ Вернуть (Redo)
+                      Consumer(
+                        builder: (context, ref, child) {
+                          final canRedo = ref.watch(currentProjectProvider.notifier).canRedo;
+                          return ListTile(
+                            leading: Icon(Icons.redo, color: canRedo ? AppColors.primary : AppColors.textMuted),
+                            title: Text('Вернуть', style: GoogleFonts.manrope(fontSize: 16, color: canRedo ? AppColors.textPrimary : AppColors.textMuted)),
+                            enabled: canRedo,
+                            onTap: () {
+                              Navigator.pop(context);
+                              if (canRedo) {
+                                HapticFeedback.lightImpact();
+                                ref.read(currentProjectProvider.notifier).redo();
+                              }
+                            },
+                          );
+                        },
+                      ),
+                      
+                      const Divider(),
+                      
+                      // 💾 Сохранить проект
+                      ListTile(
+                        leading: const Icon(Icons.save_outlined, color: AppColors.textPrimary),
+                        title: Text('Сохранить проект', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
+                        onTap: () {
+                          Navigator.pop(context);
+                          _saveProject(showSnackBar: true);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Подвал с версией
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'Твоё Видео • v1.0',
+                    style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         appBar: AppBar(
-          leading: IconButton(icon: const Icon(Icons.chevron_left, size: 28), color: AppColors.textPrimary, onPressed: _saveAndPop),
-          title: Text(project.name, style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          backgroundColor: AppColors.background,
+          elevation: 0,
+          // ✅ НОВОЕ: Гамбургер вместо стрелки
+          leading: IconButton(
+            icon: const Icon(Icons.menu, size: 26),
+            color: AppColors.textPrimary,
+            tooltip: 'Меню',
+            onPressed: _openMenu,
+          ),
+          title: Text(
+            project.name,
+            style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+            overflow: TextOverflow.ellipsis,
+          ),
           actions: [
-            // ✅ НОВОЕ: Undo / Redo
             IconButton(
-              icon: const Icon(Icons.undo, size: 20),
-              tooltip: 'Отменить',
-              color: AppColors.textPrimary,
-              disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
-              onPressed: canUndo
-                  ? () {
-                      HapticFeedback.lightImpact();
-                      ref.read(currentProjectProvider.notifier).undo();
-                    }
-                  : null,
+              icon: const Icon(Icons.auto_awesome, size: 22),
+              color: AppColors.aiAccent,
+              tooltip: 'Умный монтаж',
+              onPressed: _openSmartMontage,
             ),
-            IconButton(
-              icon: const Icon(Icons.redo, size: 20),
-              tooltip: 'Вернуть',
-              color: AppColors.textPrimary,
-              disabledColor: AppColors.textMuted.withValues(alpha: 0.3),
-              onPressed: canRedo
-                  ? () {
-                      HapticFeedback.lightImpact();
-                      ref.read(currentProjectProvider.notifier).redo();
-                    }
-                  : null,
-            ),
-            IconButton(icon: const Icon(Icons.auto_awesome, size: 22), color: AppColors.aiAccent, tooltip: 'Умный монтаж', onPressed: _openSmartMontage),
             IconButton(
               icon: Icon(project.format.icon, size: 22, color: AppColors.textPrimary),
               tooltip: 'Формат: ${project.format.name}',
               onPressed: () => showFormatSheet(context, ref),
             ),
-            IconButton(icon: const Icon(Icons.video_library_outlined, size: 24), color: AppColors.textPrimary, tooltip: 'Медиатека', onPressed: _openMediaLibrary),
+            IconButton(
+              icon: const Icon(Icons.video_library_outlined, size: 24),
+              color: AppColors.textPrimary,
+              tooltip: 'Медиатека',
+              onPressed: _openMediaLibrary,
+            ),
             TextButton(
               onPressed: () {
                 _pauseAudio();
                 ref.read(isPlayingProvider.notifier).state = false;
                 Navigator.push(context, MaterialPageRoute(builder: (context) => ExportScreen(project: project)));
               },
-              child: Text('Экспорт', style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.primary)),
+              child: Text(
+                'Экспорт',
+                style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.primary),
+              ),
             ),
           ],
         ),
-        // ✅ СЛОЙ 0: контент. СЛОЙ 1: меню поверх всего.
         body: Stack(
           children: [
             Column(
