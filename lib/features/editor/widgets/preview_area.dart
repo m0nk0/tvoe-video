@@ -15,7 +15,7 @@ import '../../../data/models/photo_layer.dart';
 import '../../../data/models/text_layer.dart';
 import '../../../data/models/video_project.dart';
 import '../../../data/providers/project_provider.dart';
-import '../playback.dart'; // ✅ Теперь функции берутся отсюда
+import '../playback.dart';
 import '../text_tools.dart';
 import 'transitions_render.dart';
 
@@ -81,11 +81,10 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
 
   void _togglePlay() {
     if (_isEditingText) setState(() => _isEditingText = false);
-    togglePlayback(ref); // ✅ Берется из playback.dart
+    togglePlayback(ref);
     _showControlsTemporarily();
   }
 
-  // ✅ ИСПРАВЛЕНО: шаг на ЦЕЛЫЙ КАДР (в начало соседнего фото)
   void _onStep(int delta) {
     final project = ref.read(currentProjectProvider);
     if (project.photos.isEmpty) return;
@@ -138,12 +137,22 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
     final hasPhotos = project.photos.isNotEmpty;
     final safeIndex = hasPhotos ? selectedIndex.clamp(0, project.photos.length - 1) : 0;
     final currentPhoto = hasPhotos ? project.photos[safeIndex] : null;
+    
     final currentTransition = currentPhoto?.transition ?? TransitionType.none;
     final currentFilter = currentPhoto?.filter;
-    final overlayType = project.overlayType;
-    final overlayIntensity = project.overlayIntensity;
     final liveMotion = currentPhoto?.liveMotion ?? LiveMotion.none;
     final cinematicIntensity = project.cinematicIntensity;
+
+    // ✅ ИСПРАВЛЕНО: Безопасная проверка оверлея кадра
+final hasFrameOverlay = currentPhoto != null && currentPhoto!.overlayType != OverlayType.none;
+
+final frameOverlay = hasFrameOverlay 
+    ? currentPhoto!.overlayType 
+    : project.overlayType;
+    
+final frameOverlayIntensity = hasFrameOverlay 
+    ? currentPhoto!.overlayIntensity 
+    : project.overlayIntensity;
 
     if (currentPhoto != null) _ensureSize(currentPhoto.imagePath);
 
@@ -249,15 +258,24 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
                                   ),
                                 ),
                                 ...buildTextOverlays(project, safeIndex, isEditing: _isEditingText, onPositionChanged: _updateTextPosition),
-                                if (overlayType != OverlayType.none)
+                                
+                                // ✅ ИСПРАВЛЕНО: Используем frameOverlay и frameOverlayIntensity
+                                if (frameOverlay != OverlayType.none)
                                   Positioned.fill(
                                     child: IgnorePointer(
                                       child: ValueListenableBuilder<int>(
                                         valueListenable: _overlayTimeMs,
-                                        builder: (context, timeMs, _) => CustomPaint(painter: _OverlayPainter(type: overlayType, timeMs: timeMs, intensity: overlayIntensity)),
+                                        builder: (context, timeMs, _) => CustomPaint(
+                                          painter: _OverlayPainter(
+                                            type: frameOverlay, 
+                                            timeMs: timeMs, 
+                                            intensity: frameOverlayIntensity
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
+                                  
                                 if (_isEditingText)
                                   Positioned(
                                     top: 16, left: 16,

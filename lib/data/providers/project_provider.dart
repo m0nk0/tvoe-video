@@ -37,12 +37,14 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   }
 
   void loadProject(VideoProject project) => setProject(project);
+  
   void reset() {
     state = VideoProject(id: const Uuid().v4(), name: 'Новый проект', photos: [], texts: []);
     _ref.read(selectedPhotoIndexProvider.notifier).state = 0;
     _ref.read(playheadMsProvider.notifier).state = 0.0;
     _ref.read(isPlayingProvider.notifier).state = false;
   }
+  
   void clearProject() => reset();
   void setName(String name) { state = state.copyWith(name: name); }
 
@@ -156,6 +158,20 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     state = state.copyWith(photos: newPhotos);
   }
 
+  // ✅ НОВОЕ: Обновление оверлея для конкретного кадра (с опцией applyToAll)
+  void updatePhotoOverlay(int index, OverlayType type, double intensity, {bool applyToAll = false}) {
+    if (index < 0 || index >= state.photos.length) return;
+    final newPhotos = List<PhotoLayer>.from(state.photos);
+    if (applyToAll) {
+      for (int i = 0; i < newPhotos.length; i++) {
+        newPhotos[i] = newPhotos[i].copyWith(overlayType: type, overlayIntensity: intensity);
+      }
+    } else {
+      newPhotos[index] = newPhotos[index].copyWith(overlayType: type, overlayIntensity: intensity);
+    }
+    state = state.copyWith(photos: newPhotos);
+  }
+
   void updatePhotoEntranceAnimation(int index, EntranceAnimation animation, {bool applyToAll = false}) {
     if (index < 0 || index >= state.photos.length) return;
     final newPhotos = List<PhotoLayer>.from(state.photos);
@@ -214,12 +230,14 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   }
 
   void addText(TextLayer layer) { state = state.copyWith(texts: [...state.texts, layer]); }
+  
   void updateText(int index, TextLayer layer) {
     if (index < 0 || index >= state.texts.length) return;
     final newTexts = List<TextLayer>.from(state.texts);
     newTexts[index] = layer;
     state = state.copyWith(texts: newTexts);
   }
+  
   void removeText(int index) {
     if (index < 0 || index >= state.texts.length) return;
     final newTexts = List<TextLayer>.from(state.texts)..removeAt(index);
@@ -227,16 +245,19 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   }
 
   void setAudioTrack(AudioTrack track) { state = state.copyWith(audioTrack: track); }
+  
   void removeAudioTrack() {
     state = VideoProject(
       id: state.id, name: state.name, photos: state.photos, texts: state.texts,
       audioTrack: null, createdAt: state.createdAt, formatId: state.formatId,
     );
   }
+  
   void updateAudioVolume(double volume) {
     if (state.audioTrack == null) return;
     state = state.copyWith(audioTrack: state.audioTrack!.copyWith(volume: volume));
   }
+  
   void updateAudioStartTime(double startTime) {
     if (state.audioTrack == null) return;
     state = state.copyWith(audioTrack: state.audioTrack!.copyWith(startTime: startTime));

@@ -36,7 +36,8 @@ class EditorScreen extends ConsumerStatefulWidget {
   ConsumerState<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends ConsumerState<EditorScreen> {
+// ✅ НОВОЕ: Добавляем WidgetsBindingObserver для отслеживания сворачивания приложения
+class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBindingObserver {
   double timelineZoom = 1.0;
   Timer? _tick;
   bool _mediaLibraryOpen = false;
@@ -44,7 +45,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
   double _lastPlayheadMs = 0;
 
   // ✅ КОНСТАНТЫ ГЕОМЕТРИИ (никогда не собьются)
-    static const double _timelineHeight = 170;
+  static const double _timelineHeight = 170;
   static const double _dividerHeight = 1;
   static const double _menuZoneHeight = 120;
   static const double _menuSize = 300;
@@ -54,9 +55,29 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       _timelineHeight + _dividerHeight + _menuZoneHeight / 2 - _menuSize / 2 + _menuLift;
 
   @override
+  void initState() {
+    super.initState();
+    // ✅ НОВОЕ: Регистрируем наблюдатель за жизненным циклом приложения
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    // ✅ НОВОЕ: Обязательно удаляем наблюдатель при уничтожении виджета
+    WidgetsBinding.instance.removeObserver(this);
     _tick?.cancel();
     super.dispose();
+  }
+
+  // ✅ НОВОЕ: Перехватываем сворачивание/закрытие приложения для автосохранения
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || 
+        state == AppLifecycleState.detached || 
+        state == AppLifecycleState.hidden) {
+      print('🔄 АВТОСОХРАНЕНИЕ при сворачивании/закрытии приложения');
+      _saveProject(showSnackBar: false); // Сохраняем тихо, без всплывающих окон
+    }
   }
 
   void _startTick() {
@@ -139,17 +160,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     final hasContent = project.photos.isNotEmpty || project.texts.isNotEmpty || project.audioTrack != null;
 
     if (!hasContent) {
-      if (showSnackBar && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Нечего сохранять: добавьте фото, текст или музыку'), backgroundColor: Colors.orange, duration: Duration(seconds: 2)),
-        );
-      }
-      return;
+      return; // Если проект пустой, молча выходим, не создаём мусор
     }
 
     try {
       await ref.read(projectRepositoryProvider).saveProject(project);
       ref.read(projectsProvider.notifier).refresh();
+      
       if (showSnackBar && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Проект сохранён'), backgroundColor: Colors.green, duration: Duration(seconds: 1)),
@@ -157,7 +174,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       }
     } catch (e, st) {
       print('❌ ОШИБКА СОХРАНЕНИЯ: $e\n$st');
-      if (mounted) {
+      if (showSnackBar && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка сохранения: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
         );
@@ -216,7 +233,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
     );
   }
 
-    void _openMediaLibraryForPhotos() {
+  void _openMediaLibraryForPhotos() {
     _pauseAudio();
     _mediaLibraryOpen = true;
     final currentPaths = ref.read(currentProjectProvider).photos.map((p) => p.imagePath).toSet();
@@ -226,7 +243,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
           initialSelectedPaths: currentPaths,
-          isEditingProject: true, // ✅ НОВОЕ
+          isEditingProject: true,
           singleSelectMode: false,
           onUsePhotos: (paths) {
             final notifier = ref.read(currentProjectProvider.notifier);
@@ -254,7 +271,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> {
       MaterialPageRoute(
         builder: (_) => MediaLibraryScreen(
           initialSelectedPaths: currentPaths,
-          isEditingProject: true, // ✅ НОВОЕ
+          isEditingProject: true,
           singleSelectMode: false,
           onUseMusic: (track) {
             ref.read(currentProjectProvider.notifier).setAudioTrack(track);

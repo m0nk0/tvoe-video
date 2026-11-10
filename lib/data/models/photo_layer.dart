@@ -1,4 +1,5 @@
 import 'package:hive/hive.dart';
+import 'video_project.dart'; // ✅ ДОБАВЛЕНО: для использования OverlayType
 
 part 'photo_layer.g.dart';
 
@@ -152,6 +153,13 @@ class PhotoLayer {
   // 🎨 НОВОЕ: Матрица авто-гармонизации цвета (20 значений double)
   @HiveField(14, defaultValue: null) final List<double>? harmonizationMatrix;
 
+  // ✅ НОВОЕ: Оверлей для конкретного кадра (приоритет над глобальным)
+  @HiveField(15, defaultValue: OverlayType.none)
+  final OverlayType overlayType;
+
+  @HiveField(16, defaultValue: 0.6)
+  final double overlayIntensity;
+
   PhotoLayer({
     required this.imagePath,
     required this.durationMilliseconds,
@@ -168,6 +176,8 @@ class PhotoLayer {
     this.transitionDurationMs = 600,
     this.liveMotion = LiveMotion.breathe,
     this.harmonizationMatrix,
+    this.overlayType = OverlayType.none, // ✅
+    this.overlayIntensity = 0.6,         // ✅
   });
 
   PhotoLayer copyWith({
@@ -186,6 +196,8 @@ class PhotoLayer {
     int? transitionDurationMs,
     LiveMotion? liveMotion,
     List<double>? harmonizationMatrix,
+    OverlayType? overlayType,       // ✅
+    double? overlayIntensity,       // ✅
   }) {
     return PhotoLayer(
       imagePath: imagePath ?? this.imagePath,
@@ -203,6 +215,8 @@ class PhotoLayer {
       transitionDurationMs: transitionDurationMs ?? this.transitionDurationMs,
       liveMotion: liveMotion ?? this.liveMotion,
       harmonizationMatrix: harmonizationMatrix ?? this.harmonizationMatrix,
+      overlayType: overlayType ?? this.overlayType,           // ✅
+      overlayIntensity: overlayIntensity ?? this.overlayIntensity, // ✅
     );
   }
 }

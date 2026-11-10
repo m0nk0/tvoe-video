@@ -37,13 +37,16 @@ class PhotoLayerAdapter extends TypeAdapter<PhotoLayer> {
       liveMotion:
           fields[13] == null ? LiveMotion.breathe : fields[13] as LiveMotion,
       harmonizationMatrix: (fields[14] as List?)?.cast<double>(),
+      overlayType:
+          fields[15] == null ? OverlayType.none : fields[15] as OverlayType,
+      overlayIntensity: fields[16] == null ? 0.6 : fields[16] as double,
     );
   }
 
   @override
   void write(BinaryWriter writer, PhotoLayer obj) {
     writer
-      ..writeByte(15)
+      ..writeByte(17)
       ..writeByte(0)
       ..write(obj.imagePath)
       ..writeByte(1)
@@ -73,7 +76,11 @@ class PhotoLayerAdapter extends TypeAdapter<PhotoLayer> {
       ..writeByte(13)
       ..write(obj.liveMotion)
       ..writeByte(14)
-      ..write(obj.harmonizationMatrix);
+      ..write(obj.harmonizationMatrix)
+      ..writeByte(15)
+      ..write(obj.overlayType)
+      ..writeByte(16)
+      ..write(obj.overlayIntensity);
   }
 
   @override
