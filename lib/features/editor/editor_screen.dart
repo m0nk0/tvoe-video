@@ -104,7 +104,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         await player.setFilePath(track.filePath);
         await player.setVolume(track.volume);
       } catch (e) {
-        print('️ Не удалось загрузить трек: $e');
+        print('⚠️ Не удалось загрузить трек: $e');
       }
     }
   }
@@ -185,10 +185,62 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     if (mounted) Navigator.of(context).pop();
   }
 
-  // ✅ НОВОЕ: Открытие гамбургер-меню
   void _openMenu() {
     HapticFeedback.lightImpact();
     _scaffoldKey.currentState?.openDrawer();
+  }
+
+  // ✅ НОВОЕ: Диалог переименования проекта
+  void _showRenameDialog() {
+    final currentName = ref.read(currentProjectProvider).name;
+    final controller = TextEditingController(text: currentName);
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Переименовать проект',
+          style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+        ),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: AppColors.textPrimary),
+          decoration: InputDecoration(
+            hintText: 'Введите название',
+            hintStyle: TextStyle(color: AppColors.textMuted.withValues(alpha: 0.6)),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary.withValues(alpha: 0.4))),
+            focusedBorder: const UnderlineInputBorder(borderSide: BorderSide(color: AppColors.primary)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty) {
+                ref.read(currentProjectProvider.notifier).setName(newName);
+                // Сразу сохраняем в репозиторий
+                ref.read(projectRepositoryProvider).saveProject(ref.read(currentProjectProvider));
+                ref.read(projectsProvider.notifier).refresh();
+              }
+              Navigator.pop(dialogContext);
+            },
+            child: Text('Сохранить', style: GoogleFonts.manrope(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ НОВОЕ: Очистка названия от эмодзи для чистого отображения
+  String _cleanProjectName(String name) {
+    return name.replaceAll(RegExp(r'[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]', unicode: true), '').trim();
   }
 
   void _showPhotoSourceSheet() {
@@ -481,6 +533,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     final notifier = ref.read(currentProjectProvider.notifier);
     final canUndo = notifier.canUndo;
     final canRedo = notifier.canRedo;
+    final cleanName = _cleanProjectName(project.name);
 
     return PopScope(
       canPop: false,
@@ -491,13 +544,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
       child: Scaffold(
         key: _scaffoldKey,
         backgroundColor: AppColors.background,
-        // ✅ НОВОЕ: Гамбургер-меню (Drawer)
         drawer: Drawer(
           backgroundColor: AppColors.surface,
           child: SafeArea(
             child: Column(
               children: [
-                // Заголовок меню
                 Padding(
                   padding: const EdgeInsets.all(20),
                   child: Row(
@@ -516,24 +567,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                   ),
                 ),
                 const Divider(height: 1),
-                
-                // Пункты меню
                 Expanded(
                   child: ListView(
                     padding: EdgeInsets.zero,
                     children: [
-                      // ← Назад (сохранить и выйти)
                       ListTile(
                         leading: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
                         title: Text('Назад', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
                         subtitle: Text('Сохранить и выйти', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
                         onTap: () {
-                          Navigator.pop(context); // закрыть drawer
+                          Navigator.pop(context);
                           _saveAndPop();
                         },
                       ),
-                      
-                      // ↩️ Отменить (Undo)
                       Consumer(
                         builder: (context, ref, child) {
                           final canUndo = ref.watch(currentProjectProvider.notifier).canUndo;
@@ -551,8 +597,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                           );
                         },
                       ),
-                      
-                      // ↪️ Вернуть (Redo)
                       Consumer(
                         builder: (context, ref, child) {
                           final canRedo = ref.watch(currentProjectProvider.notifier).canRedo;
@@ -570,10 +614,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                           );
                         },
                       ),
-                      
                       const Divider(),
-                      
-                      // 💾 Сохранить проект
                       ListTile(
                         leading: const Icon(Icons.save_outlined, color: AppColors.textPrimary),
                         title: Text('Сохранить проект', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
@@ -585,8 +626,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                     ],
                   ),
                 ),
-                
-                // Подвал с версией
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Text(
@@ -601,18 +640,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         appBar: AppBar(
           backgroundColor: AppColors.background,
           elevation: 0,
-          // ✅ НОВОЕ: Гамбургер вместо стрелки
           leading: IconButton(
             icon: const Icon(Icons.menu, size: 26),
             color: AppColors.textPrimary,
             tooltip: 'Меню',
             onPressed: _openMenu,
           ),
-          title: Text(
-            project.name,
-            style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-            overflow: TextOverflow.ellipsis,
-          ),
+          // ✅ УБРАНО: title из AppBar
           actions: [
             IconButton(
               icon: const Icon(Icons.auto_awesome, size: 22),
@@ -648,9 +682,34 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
           children: [
             Column(
               children: [
+                // ✅ НОВОЕ: Название проекта над превью (кликабельное)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                  child: GestureDetector(
+                    onTap: _showRenameDialog,
+                    behavior: HitTestBehavior.opaque,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            cleanName.isEmpty ? 'Новый проект' : cleanName,
+                            style: GoogleFonts.unbounded(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.edit_outlined, size: 18, color: AppColors.textMuted),
+                      ],
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 20),
+                    padding: const EdgeInsets.only(top: 8),
                     child: const EditorPreviewArea(),
                   ),
                 ),
