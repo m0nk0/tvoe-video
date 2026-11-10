@@ -47,6 +47,7 @@ dependencies:
   intl: ^0.19.0
   permission_handler: ^11.3.0
   google_mlkit_face_detection: ^0.15.1
+  shared_preferences: ^2.2.2
 
 dev_dependencies:
   flutter_test:
@@ -64,3 +65,4 @@ flutter:
   # ✅ Assets приложения (встроенная музыка)
   assets:
     - assets/music/
+    - assets/demo/
