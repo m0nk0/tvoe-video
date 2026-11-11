@@ -43,7 +43,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
   bool _mediaLibraryOpen = false;
   int? _pendingFormatId;
   double _lastPlayheadMs = 0;
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   static const double _timelineHeight = 170;
   static const double _dividerHeight = 1;
@@ -185,9 +184,37 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     if (mounted) Navigator.of(context).pop();
   }
 
-  void _openMenu() {
+  // ✅ НОВОЕ: Диалог подтверждения выхода
+  void _confirmBack() {
     HapticFeedback.lightImpact();
-    _scaffoldKey.currentState?.openDrawer();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Выйти из проекта?',
+          style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+        ),
+        content: Text(
+          'Проект будет автоматически сохранён',
+          style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _saveAndPop();
+            },
+            child: Text('Выйти', style: GoogleFonts.manrope(color: AppColors.primary, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
   }
 
   // ✅ НОВОЕ: Диалог переименования проекта
@@ -225,7 +252,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
               final newName = controller.text.trim();
               if (newName.isNotEmpty) {
                 ref.read(currentProjectProvider.notifier).setName(newName);
-                // Сразу сохраняем в репозиторий
                 ref.read(projectRepositoryProvider).saveProject(ref.read(currentProjectProvider));
                 ref.read(projectsProvider.notifier).refresh();
               }
@@ -238,7 +264,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     );
   }
 
-  // ✅ НОВОЕ: Очистка названия от эмодзи для чистого отображения
   String _cleanProjectName(String name) {
     return name.replaceAll(RegExp(r'[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]', unicode: true), '').trim();
   }
@@ -542,147 +567,119 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         _saveAndPop();
       },
       child: Scaffold(
-        key: _scaffoldKey,
         backgroundColor: AppColors.background,
-        drawer: Drawer(
-          backgroundColor: AppColors.surface,
-          child: SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.menu, color: AppColors.textPrimary, size: 24),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Меню',
-                        style: GoogleFonts.unbounded(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView(
-                    padding: EdgeInsets.zero,
-                    children: [
-                      ListTile(
-                        leading: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
-                        title: Text('Назад', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
-                        subtitle: Text('Сохранить и выйти', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
-                        onTap: () {
-                          Navigator.pop(context);
-                          _saveAndPop();
-                        },
-                      ),
-                      Consumer(
-                        builder: (context, ref, child) {
-                          final canUndo = ref.watch(currentProjectProvider.notifier).canUndo;
-                          return ListTile(
-                            leading: Icon(Icons.undo, color: canUndo ? AppColors.primary : AppColors.textMuted),
-                            title: Text('Отменить', style: GoogleFonts.manrope(fontSize: 16, color: canUndo ? AppColors.textPrimary : AppColors.textMuted)),
-                            enabled: canUndo,
-                            onTap: () {
-                              Navigator.pop(context);
-                              if (canUndo) {
-                                HapticFeedback.lightImpact();
-                                ref.read(currentProjectProvider.notifier).undo();
-                              }
-                            },
-                          );
-                        },
-                      ),
-                      Consumer(
-                        builder: (context, ref, child) {
-                          final canRedo = ref.watch(currentProjectProvider.notifier).canRedo;
-                          return ListTile(
-                            leading: Icon(Icons.redo, color: canRedo ? AppColors.primary : AppColors.textMuted),
-                            title: Text('Вернуть', style: GoogleFonts.manrope(fontSize: 16, color: canRedo ? AppColors.textPrimary : AppColors.textMuted)),
-                            enabled: canRedo,
-                            onTap: () {
-                              Navigator.pop(context);
-                              if (canRedo) {
-                                HapticFeedback.lightImpact();
-                                ref.read(currentProjectProvider.notifier).redo();
-                              }
-                            },
-                          );
-                        },
-                      ),
-                      const Divider(),
-                      ListTile(
-                        leading: const Icon(Icons.save_outlined, color: AppColors.textPrimary),
-                        title: Text('Сохранить проект', style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textPrimary)),
-                        onTap: () {
-                          Navigator.pop(context);
-                          _saveProject(showSnackBar: true);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    'Твоё Видео • v1.0',
-                    style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
         appBar: AppBar(
-          backgroundColor: AppColors.background,
-          elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.menu, size: 26),
-            color: AppColors.textPrimary,
-            tooltip: 'Меню',
-            onPressed: _openMenu,
+  backgroundColor: AppColors.background,
+  elevation: 0,
+  // ✅ УВЕЛИЧЕНА ширина для трёх кнопок
+  leadingWidth: 160,
+  leading: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      IconButton(
+        icon: const Icon(Icons.arrow_back, size: 20),
+        color: AppColors.textPrimary,
+        tooltip: 'Назад',
+        onPressed: _confirmBack,
+      ),
+      IconButton(
+        icon: const Icon(Icons.undo, size: 18),
+        color: canUndo ? AppColors.textPrimary : AppColors.textMuted.withValues(alpha: 0.3),
+        tooltip: 'Отменить',
+        onPressed: canUndo
+            ? () {
+                HapticFeedback.lightImpact();
+                ref.read(currentProjectProvider.notifier).undo();
+              }
+            : null,
+      ),
+      IconButton(
+        icon: const Icon(Icons.redo, size: 18),
+        color: canRedo ? AppColors.textPrimary : AppColors.textMuted.withValues(alpha: 0.3),
+        tooltip: 'Вернуть',
+        onPressed: canRedo
+            ? () {
+                HapticFeedback.lightImpact();
+                ref.read(currentProjectProvider.notifier).redo();
+              }
+            : null,
+      ),
+    ],
+  ),
+  actions: [
+    PopupMenuButton<String>(
+      icon: const Icon(Icons.more_vert, size: 24),
+      color: AppColors.surface,
+      onSelected: (value) {
+        HapticFeedback.lightImpact();
+        switch (value) {
+          case 'smart':
+            _openSmartMontage();
+            break;
+          case 'format':
+            showFormatSheet(context, ref);
+            break;
+          case 'media':
+            _openMediaLibrary();
+            break;
+          case 'export':
+            _pauseAudio();
+            ref.read(isPlayingProvider.notifier).state = false;
+            Navigator.push(context, MaterialPageRoute(builder: (context) => ExportScreen(project: project)));
+            break;
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(
+          value: 'smart',
+          child: Row(
+            children: [
+              Icon(Icons.auto_awesome, color: AppColors.aiAccent, size: 20),
+              const SizedBox(width: 12),
+              Text('Умный монтаж', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
+            ],
           ),
-          // ✅ УБРАНО: title из AppBar
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.auto_awesome, size: 22),
-              color: AppColors.aiAccent,
-              tooltip: 'Умный монтаж',
-              onPressed: _openSmartMontage,
-            ),
-            IconButton(
-              icon: Icon(project.format.icon, size: 22, color: AppColors.textPrimary),
-              tooltip: 'Формат: ${project.format.name}',
-              onPressed: () => showFormatSheet(context, ref),
-            ),
-            IconButton(
-              icon: const Icon(Icons.video_library_outlined, size: 24),
-              color: AppColors.textPrimary,
-              tooltip: 'Медиатека',
-              onPressed: _openMediaLibrary,
-            ),
-            TextButton(
-              onPressed: () {
-                _pauseAudio();
-                ref.read(isPlayingProvider.notifier).state = false;
-                Navigator.push(context, MaterialPageRoute(builder: (context) => ExportScreen(project: project)));
-              },
-              child: Text(
-                'Экспорт',
-                style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.primary),
-              ),
-            ),
-          ],
         ),
+        PopupMenuItem(
+          value: 'format',
+          child: Row(
+            children: [
+              Icon(project.format.icon, color: AppColors.textPrimary, size: 20),
+              const SizedBox(width: 12),
+              Text('Формат: ${project.format.name}', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'media',
+          child: Row(
+            children: [
+              const Icon(Icons.video_library_outlined, color: AppColors.textPrimary, size: 20),
+              const SizedBox(width: 12),
+              Text('Медиатека', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'export',
+          child: Row(
+            children: [
+              const Icon(Icons.download, color: AppColors.primary, size: 20),
+              const SizedBox(width: 12),
+              Text('Экспорт', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.primary)),
+            ],
+          ),
+        ),
+      ],
+    ),
+  ],
+),
         body: Stack(
           children: [
             Column(
               children: [
-                // ✅ НОВОЕ: Название проекта над превью (кликабельное)
+                // Название проекта над превью
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                   child: GestureDetector(
