@@ -7,7 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 // ==========================================
 // Детектор битов музыки через FFmpeg (RMS-пики)
-// ✅ С кэшированием результатов
+// ✅ Кэш + ✅ Waveform для визуализации
 // ==========================================
 
 class BeatAnalysis {
@@ -17,29 +17,34 @@ class BeatAnalysis {
   /// Оценка темпа
   final double bpm;
 
-  const BeatAnalysis({required this.beats, required this.bpm});
+  /// ✅ НОВОЕ: нормализованный амплитудный профиль (0..1) для waveform
+  final List<double> waveform;
 
-  /// Достаточно данных для синхронизации
+  /// ✅ НОВОЕ: общая длительность трека в секундах
+  final double durationSec;
+
+  const BeatAnalysis({
+    required this.beats,
+    required this.bpm,
+    this.waveform = const [],
+    this.durationSec = 0,
+  });
+
   bool get isValid => beats.length >= 4 && bpm > 40 && bpm < 220;
+  bool get hasWaveform => waveform.isNotEmpty;
 }
 
 class BeatDetector {
-  /// Окно анализа (~52 мс при 44.1 кГц)
   static const int _resetFrames = 2;
-
-  /// Минимальный интервал между ударами (сек) = макс 240 BPM
   static const double _minInterval = 0.25;
-
-  /// Чувствительность: пик должен превышать локальную среднюю в N раз
   static const double _sensitivity = 1.4;
 
   // ==========================================
-  // ✅ НОВОЕ: КЭШ результатов анализа битов
+  // КЭШ результатов анализа
   // ==========================================
   static final Map<String, BeatAnalysis> _cache = {};
   static final Map<String, Future<BeatAnalysis>> _inFlight = {};
 
-  /// Ключ кэша: путь + время изменения + размер файла
   static Future<String> _cacheKey(String path) async {
     try {
       final stat = await File(path).stat();
@@ -49,22 +54,18 @@ class BeatDetector {
     }
   }
 
-  /// Публичный метод с кэшем и защитой от параллельных дублей
   static Future<BeatAnalysis> detectBeats(String audioPath) async {
     final key = await _cacheKey(audioPath);
 
-    // 1. Уже проанализировано — возвращаем мгновенно
     final cached = _cache[key];
     if (cached != null) {
       print('⚡ BeatDetector: кэш для ${audioPath.split('/').last} (${cached.beats.length} битов, BPM ~${cached.bpm.round()})');
       return cached;
     }
 
-    // 2. Анализ уже идёт в другом месте — ждём тот же Future
     final inFlight = _inFlight[key];
     if (inFlight != null) return inFlight;
 
-    // 3. Запускаем реальный анализ
     final future = _detectBeatsInternal(audioPath).then((result) {
       _inFlight.remove(key);
       _cache[key] = result;
@@ -78,14 +79,28 @@ class BeatDetector {
     return future;
   }
 
-  /// Полная очистка кэша (для тестов или при нехватке памяти)
+  /// ✅ НОВОЕ: ручная корректировка битов (сохраняется в кэш)
+  static Future<void> overrideBeats(String audioPath, List<double> newBeats) async {
+    final key = await _cacheKey(audioPath);
+    final cur = _cache[key];
+    if (cur != null) {
+      _cache[key] = BeatAnalysis(
+        beats: newBeats,
+        bpm: cur.bpm,
+        waveform: cur.waveform,
+        durationSec: cur.durationSec,
+      );
+      print('✏️ BeatDetector: биты отредактированы вручную (${newBeats.length})');
+    }
+  }
+
   static void clearCache() {
     _cache.clear();
     _inFlight.clear();
   }
 
   // ==========================================
-  // Реальный анализ трека (без кэша)
+  // Реальный анализ трека
   // ==========================================
   static Future<BeatAnalysis> _detectBeatsInternal(String audioPath) async {
     try {
@@ -93,7 +108,6 @@ class BeatDetector {
       final outFile = File(
           '${dir.path}/rms_${DateTime.now().millisecondsSinceEpoch}.txt');
 
-      // Извлекаем RMS-уровень по окнам в текстовый файл
       final cmd = '-i "$audioPath" -af '
           '"astats=metadata=1:reset=$_resetFrames,'
           'ametadata=print:key=lavfi.astats.Overall.RMS_level:file=${outFile.path}" '
@@ -120,7 +134,7 @@ class BeatDetector {
   }
 
   // ==========================================
-  // Парсинг вывода FFmpeg + детекция пиков
+  // Парсинг вывода FFmpeg + детекция пиков + waveform
   // ==========================================
   static BeatAnalysis _parseAndDetect(String content) {
     final times = <double>[];
@@ -136,7 +150,6 @@ class BeatDetector {
         final v = double.tryParse(line.split('=').last);
         if (v != null && lastTime != null) {
           times.add(lastTime);
-          // дБ → линейная энергия
           energies.add(math.pow(10, v / 20).toDouble());
         }
       }
@@ -146,9 +159,25 @@ class BeatDetector {
       return const BeatAnalysis(beats: [], bpm: 0);
     }
 
+    // ---- Waveform: сжимаем энергии в 240 корзин по времени ----
+    final totalSec = times.last;
+        final buckets = (totalSec * 20).round().clamp(64, 4000); // 1 корзина на 50 мс
+    final waveform = List<double>.filled(buckets, 0);
+    final bucketSec = totalSec / buckets;
+    for (int i = 0; i < times.length; i++) {
+      final b = (times[i] / bucketSec).floor().clamp(0, buckets - 1);
+      if (energies[i] > waveform[b]) waveform[b] = energies[i];
+    }
+    final maxAmp = waveform.reduce(math.max);
+    if (maxAmp > 0) {
+      for (int i = 0; i < buckets; i++) {
+        waveform[i] = (waveform[i] / maxAmp).clamp(0.0, 1.0).toDouble();
+      }
+    }
+
     // ---- Поиск пиков относительно локальной средней ----
     final beats = <double>[];
-    const window = 20; // ~1 сек окружения
+    const window = 20;
     double lastBeat = -1;
 
     for (int i = 2; i < times.length - 2; i++) {
@@ -171,7 +200,7 @@ class BeatDetector {
     }
 
     if (beats.length < 4) {
-      return const BeatAnalysis(beats: [], bpm: 0);
+      return BeatAnalysis(beats: const [], bpm: 0, waveform: waveform, durationSec: totalSec);
     }
 
     // ---- BPM по медиане интервалов ----
@@ -184,6 +213,6 @@ class BeatDetector {
     final bpm = median > 0 ? 60 / median : 0.0;
 
     print('🎵 BeatDetector: ${beats.length} битов, BPM ~${bpm.round()}');
-    return BeatAnalysis(beats: beats, bpm: bpm);
+    return BeatAnalysis(beats: beats, bpm: bpm, waveform: waveform, durationSec: totalSec);
   }
 }

@@ -150,7 +150,22 @@ Future<void> _createDemoProject() async {
     id: const Uuid().v4(),
     name: '🔥 Тестовый проект (не удалять)',
     photos: photoLayers,
-    texts: [],
+        texts: [
+      TextLayer(
+        text: 'Твоё Видео',
+        startTimeMilliseconds: 0,
+        endTimeMilliseconds: 2500,
+        animation: AnimationType.fadeIn,
+        fontSize: 32,
+      ),
+      TextLayer(
+        text: 'Создавай клипы за минуты',
+        startTimeMilliseconds: 2500,
+        endTimeMilliseconds: 5500,
+        animation: AnimationType.slideUp,
+        fontSize: 24,
+      ),
+    ],
     audioTrack: audioTrack,
     formatId: 0, // 9:16 по умолчанию
     overlayType: OverlayType.film, // Демонстрация оверлеев!

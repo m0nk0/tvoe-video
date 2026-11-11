@@ -26,6 +26,7 @@ import 'sheets/live_motion_sheet.dart';
 import 'sheets/overlays_sheet.dart';
 import 'sheets/transitions_sheet.dart';
 import 'text_tools.dart';
+import 'timeline_studio_screen.dart';
 import 'widgets/preview_area.dart';
 import 'widgets/timeline.dart';
 import 'widgets/radial_tool_menu.dart';
@@ -184,14 +185,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     if (mounted) Navigator.of(context).pop();
   }
 
-  // ✅ НОВОЕ: Выход без сохранения
   Future<void> _exitWithoutSaving() async {
     ref.read(isPlayingProvider.notifier).state = false;
     await _pauseAudio();
     if (mounted) Navigator.of(context).pop();
   }
 
-  // ✅ ИСПРАВЛЕНО: Три варианта — Не сохранять / Отмена / Сохранить
   void _confirmBack() {
     HapticFeedback.lightImpact();
     showDialog(
@@ -208,7 +207,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
           style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textSecondary),
         ),
         actions: [
-          // ❌ Не сохранять
           TextButton(
             onPressed: () {
               Navigator.pop(dialogContext);
@@ -216,12 +214,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
             },
             child: Text('Не сохранять', style: GoogleFonts.manrope(color: AppColors.error)),
           ),
-          // ⏸ Отмена
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
           ),
-          // ✅ Сохранить и выйти
           TextButton(
             onPressed: () {
               Navigator.pop(dialogContext);
@@ -234,11 +230,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     );
   }
 
-  // ✅ НОВОЕ: Диалог переименования проекта
   void _showRenameDialog() {
     final currentName = ref.read(currentProjectProvider).name;
     final controller = TextEditingController(text: currentName);
-    
+
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -588,7 +583,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
         appBar: AppBar(
           backgroundColor: AppColors.background,
           elevation: 0,
-          // ✅ СЛЕВА: Назад, Undo, Redo
           leadingWidth: 160,
           leading: Row(
             mainAxisSize: MainAxisSize.min,
@@ -623,8 +617,20 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
               ),
             ],
           ),
-          // ✅ СПРАВА: Меню с действиями
           actions: [
+            // ✅ Кнопка входа в Timeline Studio (текстовая, понятная)
+            TextButton.icon(
+              onPressed: () {
+                _pauseAudio();
+                ref.read(isPlayingProvider.notifier).state = false;
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const TimelineStudioScreen()));
+              },
+              icon: const Icon(Icons.open_in_full, size: 18),
+              label: Text(
+                'Таймлайн',
+                style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+              ),
+            ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, size: 24),
               color: AppColors.surface,
@@ -697,7 +703,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
           children: [
             Column(
               children: [
-                // Название проекта над превью (кликабельное)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                   child: GestureDetector(
