@@ -184,7 +184,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
     if (mounted) Navigator.of(context).pop();
   }
 
-  // ✅ НОВОЕ: Диалог подтверждения выхода
+  // ✅ НОВОЕ: Выход без сохранения
+  Future<void> _exitWithoutSaving() async {
+    ref.read(isPlayingProvider.notifier).state = false;
+    await _pauseAudio();
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  // ✅ ИСПРАВЛЕНО: Три варианта — Не сохранять / Отмена / Сохранить
   void _confirmBack() {
     HapticFeedback.lightImpact();
     showDialog(
@@ -197,20 +204,30 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
           style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
         ),
         content: Text(
-          'Проект будет автоматически сохранён',
+          'Сохранить изменения перед выходом?',
           style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textSecondary),
         ),
         actions: [
+          // ❌ Не сохранять
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _exitWithoutSaving();
+            },
+            child: Text('Не сохранять', style: GoogleFonts.manrope(color: AppColors.error)),
+          ),
+          // ⏸ Отмена
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
             child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
           ),
+          // ✅ Сохранить и выйти
           TextButton(
             onPressed: () {
               Navigator.pop(dialogContext);
               _saveAndPop();
             },
-            child: Text('Выйти', style: GoogleFonts.manrope(color: AppColors.primary, fontWeight: FontWeight.w600)),
+            child: Text('Сохранить', style: GoogleFonts.manrope(color: AppColors.primary, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -569,117 +586,118 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
       child: Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
-  backgroundColor: AppColors.background,
-  elevation: 0,
-  // ✅ УВЕЛИЧЕНА ширина для трёх кнопок
-  leadingWidth: 160,
-  leading: Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      IconButton(
-        icon: const Icon(Icons.arrow_back, size: 20),
-        color: AppColors.textPrimary,
-        tooltip: 'Назад',
-        onPressed: _confirmBack,
-      ),
-      IconButton(
-        icon: const Icon(Icons.undo, size: 18),
-        color: canUndo ? AppColors.textPrimary : AppColors.textMuted.withValues(alpha: 0.3),
-        tooltip: 'Отменить',
-        onPressed: canUndo
-            ? () {
+          backgroundColor: AppColors.background,
+          elevation: 0,
+          // ✅ СЛЕВА: Назад, Undo, Redo
+          leadingWidth: 160,
+          leading: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back, size: 20),
+                color: AppColors.textPrimary,
+                tooltip: 'Назад',
+                onPressed: _confirmBack,
+              ),
+              IconButton(
+                icon: const Icon(Icons.undo, size: 18),
+                color: canUndo ? AppColors.textPrimary : AppColors.textMuted.withValues(alpha: 0.3),
+                tooltip: 'Отменить',
+                onPressed: canUndo
+                    ? () {
+                        HapticFeedback.lightImpact();
+                        ref.read(currentProjectProvider.notifier).undo();
+                      }
+                    : null,
+              ),
+              IconButton(
+                icon: const Icon(Icons.redo, size: 18),
+                color: canRedo ? AppColors.textPrimary : AppColors.textMuted.withValues(alpha: 0.3),
+                tooltip: 'Вернуть',
+                onPressed: canRedo
+                    ? () {
+                        HapticFeedback.lightImpact();
+                        ref.read(currentProjectProvider.notifier).redo();
+                      }
+                    : null,
+              ),
+            ],
+          ),
+          // ✅ СПРАВА: Меню с действиями
+          actions: [
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 24),
+              color: AppColors.surface,
+              onSelected: (value) {
                 HapticFeedback.lightImpact();
-                ref.read(currentProjectProvider.notifier).undo();
-              }
-            : null,
-      ),
-      IconButton(
-        icon: const Icon(Icons.redo, size: 18),
-        color: canRedo ? AppColors.textPrimary : AppColors.textMuted.withValues(alpha: 0.3),
-        tooltip: 'Вернуть',
-        onPressed: canRedo
-            ? () {
-                HapticFeedback.lightImpact();
-                ref.read(currentProjectProvider.notifier).redo();
-              }
-            : null,
-      ),
-    ],
-  ),
-  actions: [
-    PopupMenuButton<String>(
-      icon: const Icon(Icons.more_vert, size: 24),
-      color: AppColors.surface,
-      onSelected: (value) {
-        HapticFeedback.lightImpact();
-        switch (value) {
-          case 'smart':
-            _openSmartMontage();
-            break;
-          case 'format':
-            showFormatSheet(context, ref);
-            break;
-          case 'media':
-            _openMediaLibrary();
-            break;
-          case 'export':
-            _pauseAudio();
-            ref.read(isPlayingProvider.notifier).state = false;
-            Navigator.push(context, MaterialPageRoute(builder: (context) => ExportScreen(project: project)));
-            break;
-        }
-      },
-      itemBuilder: (context) => [
-        PopupMenuItem(
-          value: 'smart',
-          child: Row(
-            children: [
-              Icon(Icons.auto_awesome, color: AppColors.aiAccent, size: 20),
-              const SizedBox(width: 12),
-              Text('Умный монтаж', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
-            ],
-          ),
+                switch (value) {
+                  case 'smart':
+                    _openSmartMontage();
+                    break;
+                  case 'format':
+                    showFormatSheet(context, ref);
+                    break;
+                  case 'media':
+                    _openMediaLibrary();
+                    break;
+                  case 'export':
+                    _pauseAudio();
+                    ref.read(isPlayingProvider.notifier).state = false;
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => ExportScreen(project: project)));
+                    break;
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'smart',
+                  child: Row(
+                    children: [
+                      Icon(Icons.auto_awesome, color: AppColors.aiAccent, size: 20),
+                      const SizedBox(width: 12),
+                      Text('Умный монтаж', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'format',
+                  child: Row(
+                    children: [
+                      Icon(project.format.icon, color: AppColors.textPrimary, size: 20),
+                      const SizedBox(width: 12),
+                      Text('Формат: ${project.format.name}', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'media',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.video_library_outlined, color: AppColors.textPrimary, size: 20),
+                      const SizedBox(width: 12),
+                      Text('Медиатека', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'export',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.download, color: AppColors.primary, size: 20),
+                      const SizedBox(width: 12),
+                      Text('Экспорт', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.primary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
-        PopupMenuItem(
-          value: 'format',
-          child: Row(
-            children: [
-              Icon(project.format.icon, color: AppColors.textPrimary, size: 20),
-              const SizedBox(width: 12),
-              Text('Формат: ${project.format.name}', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
-            ],
-          ),
-        ),
-        PopupMenuItem(
-          value: 'media',
-          child: Row(
-            children: [
-              const Icon(Icons.video_library_outlined, color: AppColors.textPrimary, size: 20),
-              const SizedBox(width: 12),
-              Text('Медиатека', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textPrimary)),
-            ],
-          ),
-        ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          value: 'export',
-          child: Row(
-            children: [
-              const Icon(Icons.download, color: AppColors.primary, size: 20),
-              const SizedBox(width: 12),
-              Text('Экспорт', style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.primary)),
-            ],
-          ),
-        ),
-      ],
-    ),
-  ],
-),
         body: Stack(
           children: [
             Column(
               children: [
-                // Название проекта над превью
+                // Название проекта над превью (кликабельное)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                   child: GestureDetector(
