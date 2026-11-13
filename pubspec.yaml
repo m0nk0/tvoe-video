@@ -11,7 +11,7 @@ dependencies:
     sdk: flutter
 
   # FFmpeg для микширования видео и музыки
-  ffmpeg_kit_flutter_new_min: ^3.6.0
+  # ffmpeg_kit_flutter_new_min: ^3.6.0
 
   # Воспроизведение видео в медиатеке
   video_player: ^2.8.3
@@ -30,13 +30,14 @@ dependencies:
   # Video & Media
   image_picker: ^1.0.7
   path_provider: ^2.1.2
-  flutter_quick_video_encoder: ^1.7.2
+  # flutter_quick_video_encoder: ^1.7.2
   gal: ^2.3.0
-  share_plus: ^7.2.1
+  share_plus: ^10.1.2  # ✅ Обновляем до актуальной версии, которая не ломает сборку
 
   # Аудио (для музыки в видео)
-  file_picker: ^8.1.2
-  just_audio: ^0.9.36
+  # ✅ ЖЕСТКО ЗАФИКСИРОВАНО: версии, которые не ломают AAR metadata и Java-компилятор
+  file_picker: 10.3.3
+  just_audio: 0.9.46
   audio_video_progress_bar: ^2.0.2
 
   # UI & Icons

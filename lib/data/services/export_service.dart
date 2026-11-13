@@ -5,9 +5,13 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter_quick_video_encoder/flutter_quick_video_encoder.dart';
-import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
+
+// ❌ ОТКЛЮЧЕНО: Эти плагины вызывают конфликт compileSdk 33 vs 36 в Gradle.
+// В будущем заменим на нативный Platform Channel (MediaCodec).
+// import 'package:flutter_quick_video_encoder/flutter_quick_video_encoder.dart';
+// import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+// import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
+
 import 'package:path_provider/path_provider.dart';
 import 'package:gal/gal.dart';
 
@@ -79,7 +83,15 @@ class ExportService {
         cancelChecker: cancelChecker,
       );
 
-      if (silentResult == null) return null;
+      // Если рендер отключен (вернул null), завершаем экспорт с предупреждением
+      if (silentResult == null) {
+        onProgress?.call(1.0);
+        return ExportResult(
+          videoPath: finalVideoPath,
+          hasAudio: false,
+          warning: 'Рендер видео временно отключен для стабилизации сборки.',
+        );
+      }
 
       if (project.audioTrack != null) {
         onProgress?.call(0.85);
@@ -126,6 +138,9 @@ class ExportService {
     }
   }
 
+  // ==========================================
+  // ❌ ЗАГЛУШКА: Рендер отключен
+  // ==========================================
   static Future<String?> _renderSilentVideo({
     required VideoProject project,
     required int width,
@@ -134,6 +149,11 @@ class ExportService {
     required Function(double) onProgress,
     bool Function()? cancelChecker,
   }) async {
+    print('⚠️ _renderSilentVideo: flutter_quick_video_encoder отключен для стабилизации Release.');
+    onProgress(1.0);
+    return null;
+
+    /* ОРИГИНАЛЬНЫЙ КОД (сохранен для будущего восстановления):
     try {
       await FlutterQuickVideoEncoder.setup(
         width: width,
@@ -191,8 +211,12 @@ class ExportService {
       _cleanup([outputPath]);
       return null;
     }
+    */
   }
 
+  // ==========================================
+  // ❌ ЗАГЛУШКА: FFmpeg отключен
+  // ==========================================
   static Future<bool> _mixWithAudio({
     required String videoPath,
     required String audioPath,
@@ -201,6 +225,10 @@ class ExportService {
     required double startTime,
     required int totalDurationMs,
   }) async {
+    print('⚠️ _mixWithAudio: ffmpeg_kit отключен для стабилизации Release.');
+    return false;
+
+    /* ОРИГИНАЛЬНЫЙ КОД (сохранен для будущего восстановления):
     try {
       final audioFile = File(audioPath);
       if (!audioFile.existsSync()) return false;
@@ -230,6 +258,7 @@ class ExportService {
       _cleanup([outputPath]);
       return false;
     }
+    */
   }
 
   static Future<Uint8List?> _renderFrame({
@@ -319,7 +348,6 @@ class ExportService {
       offsetY: currentPhoto.offsetY,
     );
 
-    // 🎬 Ken Burns + Cinematic с интенсивностью
     final elapsedMsForMotion = frameProgress * currentPhoto.durationMilliseconds;
     final motionT = currentPhoto.durationMilliseconds > 0
         ? (elapsedMsForMotion / currentPhoto.durationMilliseconds).clamp(0.0, 1.0)
@@ -329,7 +357,7 @@ class ExportService {
       dst,
       currentPhoto.liveMotion,
       motionT,
-      intensity: project.cinematicIntensity, // ✅ Именованный параметр
+      intensity: project.cinematicIntensity,
     );
     final liveDst = cinematicResult.rect;
 
@@ -415,9 +443,6 @@ class ExportService {
       }
     }
 
-    // ==========================================
-    // 2. Переход (фото рисуется в liveDst с учетом Ken Burns + Cinematic)
-    // ==========================================
     switch (currentPhoto.transition) {
       case TransitionType.none:
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));

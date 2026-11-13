@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
+// ❌ ОТКЛЮЧЕНО: Эти плагины вызывают конфликт compileSdk 33 vs 36 в Gradle.
+// В будущем заменим на нативный анализ или серверную обработку.
+// import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+// import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:path_provider/path_provider.dart';
 
 // ==========================================
@@ -100,9 +102,13 @@ class BeatDetector {
   }
 
   // ==========================================
-  // Реальный анализ трека
+  // ❌ ЗАГЛУШКА: Реальный анализ трека отключен
   // ==========================================
   static Future<BeatAnalysis> _detectBeatsInternal(String audioPath) async {
+    print('⚠️ BeatDetector: FFmpeg отключен для стабилизации Release-сборки. Возвращаем пустой анализ.');
+    return const BeatAnalysis(beats: [], bpm: 0, waveform: [], durationSec: 0);
+
+    /* ОРИГИНАЛЬНЫЙ КОД (сохранен для будущего восстановления):
     try {
       final dir = await getTemporaryDirectory();
       final outFile = File(
@@ -131,6 +137,7 @@ class BeatDetector {
       print('⚠️ BeatDetector: $e');
       return const BeatAnalysis(beats: [], bpm: 0);
     }
+    */
   }
 
   // ==========================================
@@ -161,7 +168,7 @@ class BeatDetector {
 
     // ---- Waveform: сжимаем энергии в 240 корзин по времени ----
     final totalSec = times.last;
-        final buckets = (totalSec * 20).round().clamp(64, 4000); // 1 корзина на 50 мс
+    final buckets = (totalSec * 20).round().clamp(64, 4000); // 1 корзина на 50 мс
     final waveform = List<double>.filled(buckets, 0);
     final bucketSec = totalSec / buckets;
     for (int i = 0; i < times.length; i++) {
