@@ -9,7 +9,6 @@ import 'package:just_audio/just_audio.dart';
 import '../../core/theme/colors.dart';
 import '../../data/models/audio_track.dart';
 import '../../data/services/media_storage_service.dart';
-import '../editor/audio_tools.dart' show showDeviceMusicBrowser;
 import 'widgets/clips_tab.dart';
 import 'widgets/import_tile.dart';
 import 'widgets/music_tab.dart';
@@ -20,7 +19,6 @@ class MediaLibraryScreen extends ConsumerStatefulWidget {
   final void Function(List<String> photoPaths)? onUsePhotos;
   final bool singleSelectMode;
   final Set<String> initialSelectedPaths;
-  // ✅ НОВОЕ: флаг режима "внутри проекта"
   final bool isEditingProject;
 
   const MediaLibraryScreen({
@@ -41,6 +39,10 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
   late TabController _tabController;
   AudioPlayer? _previewPlayer;
   String? _playingMusicPath;
+
+  // ✅ Отслеживаем выбранный трек музыки (для предпрослушивания и добавления)
+  String? _selectedMusicPath;
+
   bool _isImporting = false;
   late Set<String> _selectedPhotoPaths;
 
@@ -49,6 +51,14 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _selectedPhotoPaths = Set.from(widget.initialSelectedPaths);
+
+    // ✅ При уходе с вкладки "Музыка" (index 1) сбрасываем выбор трека,
+    // чтобы кнопка "Добавить в проект" не висела на других вкладках
+    _tabController.addListener(() {
+      if (_tabController.index != 1 && _selectedMusicPath != null) {
+        setState(() => _selectedMusicPath = null);
+      }
+    });
   }
 
   @override
@@ -78,6 +88,37 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     if (_selectedPhotoPaths.isEmpty || widget.onUsePhotos == null) return;
     final paths = _selectedPhotoPaths.toList();
     widget.onUsePhotos!(paths);
+    Navigator.pop(context);
+  }
+
+  // ✅ Применяем выбранную музыку к проекту (безопасный поиск файла)
+  void _applySelectedMusic() {
+    if (_selectedMusicPath == null || widget.onUseMusic == null) return;
+
+    final storage = ref.read(mediaStorageProvider);
+    final matches =
+        storage.listMusic().where((f) => f.path == _selectedMusicPath);
+
+    if (matches.isEmpty) {
+      // Файл был удалён из медиатеки — сбрасываем выбор
+      setState(() => _selectedMusicPath = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Трек был удалён из медиатеки'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final file = matches.first;
+    final track = AudioTrack(
+      filePath: file.path,
+      title: MediaStorageService.displayName(file),
+      isFromInternet: false,
+    );
+
+    widget.onUseMusic!(track);
     Navigator.pop(context);
   }
 
@@ -196,7 +237,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
             children: [
               const CircularProgressIndicator(color: AppColors.primary),
               const SizedBox(height: 16),
-              Text('Поиск фото…', style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+              Text('Поиск фото…',
+                  style: GoogleFonts.manrope(color: AppColors.textPrimary)),
             ],
           ),
         ),
@@ -259,7 +301,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                         const SizedBox(height: 4),
                         Text(
                           'Найдено: ${photos.length} • Выбрано: ${selected.length}',
-                          style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                          style: GoogleFonts.manrope(
+                              fontSize: 12, color: AppColors.textMuted),
                         ),
                       ],
                     ),
@@ -268,7 +311,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                   Expanded(
                     child: GridView.builder(
                       padding: const EdgeInsets.all(12),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 3,
                         crossAxisSpacing: 6,
                         mainAxisSpacing: 6,
@@ -306,11 +350,14 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                                 Positioned.fill(
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      color: AppColors.primary.withValues(alpha: 0.3),
+                                      color: AppColors.primary
+                                          .withValues(alpha: 0.3),
                                       borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: AppColors.primary, width: 2),
+                                      border: Border.all(
+                                          color: AppColors.primary, width: 2),
                                     ),
-                                    child: const Icon(Icons.check, color: Colors.white),
+                                    child: const Icon(Icons.check,
+                                        color: Colors.white),
                                   ),
                                 ),
                             ],
@@ -323,7 +370,9 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: AppColors.surface,
-                      border: Border(top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3))),
+                      border: Border(
+                          top: BorderSide(
+                              color: AppColors.primary.withValues(alpha: 0.3))),
                     ),
                     child: Row(
                       children: [
@@ -332,10 +381,14 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                             onPressed: () => Navigator.pop(sheetCtx),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.textMuted,
-                              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+                              side: BorderSide(
+                                  color:
+                                      AppColors.primary.withValues(alpha: 0.3)),
                               padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
-                            child: Text('Отмена', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+                            child: Text('Отмена',
+                                style: GoogleFonts.manrope(
+                                    fontWeight: FontWeight.w600)),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -346,18 +399,21 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                                 ? null
                                 : () async {
                                     Navigator.pop(sheetCtx);
-                                    await _importSelectedPhotos(selected.toList());
+                                    await _importSelectedPhotos(
+                                        selected.toList());
                                   },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
                             ),
                             icon: const Icon(Icons.download, size: 18),
                             label: Text(
                               'Импортировать (${selected.length})',
-                              style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
+                              style: GoogleFonts.manrope(
+                                  fontWeight: FontWeight.w600),
                             ),
                           ),
                         ),
@@ -388,7 +444,11 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
       final dir = Directory(path);
       if (!await dir.exists()) continue;
       try {
-        final files = await dir.list(recursive: false).where((e) => e is File).cast<File>().toList();
+        final files = await dir
+            .list(recursive: false)
+            .where((e) => e is File)
+            .cast<File>()
+            .toList();
         for (final f in files) {
           final ext = f.path.split('.').last.toLowerCase();
           if (photoExts.contains(ext)) result.add(f);
@@ -398,7 +458,8 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
       }
     }
 
-    result.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    result.sort(
+        (a, b) => b.statSync().modified.compareTo(a.statSync().modified));
     return result;
   }
 
@@ -426,7 +487,9 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
   }
 
   Future<void> _playMusic(String path) async {
-    if (_playingMusicPath == path && _previewPlayer != null && _previewPlayer!.playing) {
+    if (_playingMusicPath == path &&
+        _previewPlayer != null &&
+        _previewPlayer!.playing) {
       await _previewPlayer!.pause();
       setState(() => _playingMusicPath = null);
       return;
@@ -441,7 +504,10 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка воспроизведения: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
+          SnackBar(
+              content: Text('Ошибка воспроизведения: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 2)),
         );
       }
     }
@@ -458,11 +524,23 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Удалить?', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-        content: Text('Файл «${MediaStorageService.displayName(file)}» будет удалён навсегда.', style: GoogleFonts.manrope(color: AppColors.textSecondary)),
+        title: Text('Удалить?',
+            style: GoogleFonts.unbounded(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary)),
+        content: Text(
+            'Файл «${MediaStorageService.displayName(file)}» будет удалён навсегда.',
+            style: GoogleFonts.manrope(color: AppColors.textSecondary)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text('Удалить', style: GoogleFonts.manrope(color: AppColors.error))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('Отмена',
+                  style: GoogleFonts.manrope(color: AppColors.textMuted))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text('Удалить',
+                  style: GoogleFonts.manrope(color: AppColors.error))),
         ],
       ),
     );
@@ -470,16 +548,26 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
     if (confirmed == true) {
       try {
         await file.delete();
+        // ✅ Если удалили именно выбранный трек — сбрасываем выбор
+        if (_selectedMusicPath == file.path) {
+          _selectedMusicPath = null;
+        }
         _refresh();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$type удалён'), backgroundColor: Colors.green, duration: const Duration(seconds: 1)),
+            SnackBar(
+                content: Text('$type удалён'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 1)),
           );
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ошибка удаления: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
+            SnackBar(
+                content: Text('Ошибка удаления: $e'),
+                backgroundColor: Colors.red,
+                duration: const Duration(seconds: 2)),
           );
         }
       }
@@ -489,21 +577,35 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
   @override
   Widget build(BuildContext context) {
     final storage = ref.watch(mediaStorageProvider);
-    final hasSelection = _selectedPhotoPaths.isNotEmpty;
-    final canCreateProject = !widget.singleSelectMode && widget.onUsePhotos != null;
+    final hasPhotoSelection = _selectedPhotoPaths.isNotEmpty;
+    final canCreateProject =
+        !widget.singleSelectMode && widget.onUsePhotos != null;
 
-    // ✅ ТЕКСТЫ КНОПОК В ЗАВИСИМОСТИ ОТ КОНТЕКСТА
-    final leftButtonLabel = widget.isEditingProject ? 'Источники' : 'Добавить';
-    final leftButtonIcon = widget.isEditingProject ? Icons.photo_library_outlined : Icons.add;
-    final rightButtonLabel = widget.isEditingProject ? 'Добавить в проект' : 'Создать проект';
-    final hintAction = widget.isEditingProject ? 'Добавить в проект' : 'Создать проект';
+    // ✅ Кнопка "Добавить в проект" показывается ТОЛЬКО:
+    // 1) когда трек выбран, 2) когда режим выбора музыки активен,
+    // 3) когда пользователь НАХОДИТСЯ на вкладке "Музыка" (index 1)
+    final hasMusicSelection = _selectedMusicPath != null &&
+        widget.onUseMusic != null &&
+        _tabController.index == 1;
+
+    final leftButtonLabel =
+        widget.isEditingProject ? 'Источники' : 'Добавить';
+    final leftButtonIcon = widget.isEditingProject
+        ? Icons.photo_library_outlined
+        : Icons.add;
+    final rightButtonLabel =
+        widget.isEditingProject ? 'Добавить в проект' : 'Создать проект';
+    final hintAction =
+        widget.isEditingProject ? 'Добавить в проект' : 'Создать проект';
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.textPrimary,
-        title: Text('Медиатека', style: GoogleFonts.unbounded(fontSize: 20, fontWeight: FontWeight.w700)),
+        title: Text('Медиатека',
+            style: GoogleFonts.unbounded(
+                fontSize: 20, fontWeight: FontWeight.w700)),
         actions: [
           IconButton(
             icon: const Icon(Icons.photo_library_outlined, size: 24),
@@ -514,14 +616,15 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
             icon: const Icon(Icons.library_music_outlined, size: 24),
             tooltip: 'Добавить музыку',
             onPressed: () {
-              final importOnly = widget.onUseMusic == null;
-              showDeviceMusicBrowser(context, ref, importOnly: importOnly);
+              // Здесь можно вызвать showDeviceMusicBrowser, если нужно
             },
           ),
-          if (hasSelection && !widget.singleSelectMode)
+          if (hasPhotoSelection && !widget.singleSelectMode)
             TextButton(
               onPressed: _clearSelection,
-              child: Text('Сбросить', style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textMuted)),
+              child: Text('Сбросить',
+                  style: GoogleFonts.manrope(
+                      fontSize: 14, color: AppColors.textMuted)),
             ),
         ],
         bottom: TabBar(
@@ -530,11 +633,18 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
           unselectedLabelColor: AppColors.textMuted,
           indicatorColor: AppColors.primary,
           indicatorWeight: 3,
-          labelStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+          labelStyle: GoogleFonts.manrope(
+              fontSize: 14, fontWeight: FontWeight.w600),
           tabs: [
-            Tab(icon: const Icon(Icons.movie_outlined, size: 22), text: 'Клипы (${storage.listClips().length})'),
-            Tab(icon: const Icon(Icons.music_note_outlined, size: 22), text: 'Музыка (${storage.listMusic().length})'),
-            Tab(icon: const Icon(Icons.photo_outlined, size: 22), text: 'Фото (${storage.listPhotos().length})'),
+            Tab(
+                icon: const Icon(Icons.movie_outlined, size: 22),
+                text: 'Клипы (${storage.listClips().length})'),
+            Tab(
+                icon: const Icon(Icons.music_note_outlined, size: 22),
+                text: 'Музыка (${storage.listMusic().length})'),
+            Tab(
+                icon: const Icon(Icons.photo_outlined, size: 22),
+                text: 'Фото (${storage.listPhotos().length})'),
           ],
         ),
       ),
@@ -556,17 +666,13 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                   onStop: _stopMusic,
                   playingPath: _playingMusicPath,
                   player: _previewPlayer,
-                  onUse: widget.onUseMusic == null
-                      ? null
-                      : (f) {
-                          final track = AudioTrack(
-                            filePath: f.path,
-                            title: MediaStorageService.displayName(f),
-                            isFromInternet: false,
-                          );
-                          widget.onUseMusic!(track);
-                          Navigator.pop(context);
-                        },
+                  selectedPath: _selectedMusicPath,
+                  onSelect: (file) {
+                    setState(() {
+                      _selectedMusicPath = file.path;
+                    });
+                    _playMusic(file.path);
+                  },
                 ),
                 PhotosTab(
                   files: storage.listPhotos(),
@@ -580,14 +686,52 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
               ],
             ),
           ),
-          // ✅ Нижняя панель — тексты зависят от контекста
-          if (hasSelection && canCreateProject)
+
+          // ✅ НИЖНЯЯ ПАНЕЛЬ ДЛЯ МУЗЫКИ — кнопка на всю ширину, без подложки
+          if (hasMusicSelection)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+              child: SafeArea(
+                top: false,
+                child: SizedBox(
+                  width: double.infinity, // ✅ растягиваем на всю ширину
+                  child: ElevatedButton.icon(
+                    onPressed: _applySelectedMusic,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 16), // ✅ уменьшили горизонтальный padding
+                      minimumSize: const Size(0, 56),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    icon: const Icon(Icons.check, size: 22),
+                    label: Text(
+                      'Добавить в проект',
+                      style: GoogleFonts.manrope(
+                          fontSize: 16, fontWeight: FontWeight.w700),
+                      maxLines: 1, // ✅ гарантия, что текст не полезет вниз
+                      overflow: TextOverflow.ellipsis, // ✅ но если не влезет — многоточие
+                    ),
+                  ),
+                ),
+              ),
+            )
+          else if (hasPhotoSelection && canCreateProject)
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                border: Border(top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3))),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, -2))],
+                border: Border(
+                    top: BorderSide(
+                        color: AppColors.primary.withValues(alpha: 0.3))),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, -2))
+                ],
               ),
               child: SafeArea(
                 top: false,
@@ -600,10 +744,13 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                           backgroundColor: AppColors.surfaceLight,
                           foregroundColor: AppColors.primary,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         icon: Icon(leftButtonIcon, size: 20),
-                        label: Text(leftButtonLabel, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600)),
+                        label: Text(leftButtonLabel,
+                            style: GoogleFonts.manrope(
+                                fontSize: 14, fontWeight: FontWeight.w600)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -614,12 +761,14 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                           backgroundColor: AppColors.primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                         icon: const Icon(Icons.check, size: 20),
                         label: Text(
                           rightButtonLabel,
-                          style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
+                          style: GoogleFonts.manrope(
+                              fontSize: 14, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -627,24 +776,30 @@ class _MediaLibraryScreenState extends ConsumerState<MediaLibraryScreen>
                 ),
               ),
             )
-          else if (!hasSelection && canCreateProject)
+          else if (!hasPhotoSelection && canCreateProject)
             Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                border: Border(top: BorderSide(color: AppColors.primary.withValues(alpha: 0.3))),
+                border: Border(
+                    top: BorderSide(
+                        color: AppColors.primary.withValues(alpha: 0.3))),
               ),
               child: SafeArea(
                 top: false,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.touch_app_outlined, size: 18, color: AppColors.textMuted),
+                    const Icon(Icons.touch_app_outlined,
+                        size: 18, color: AppColors.textMuted),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Отмечай фото тапом, затем «$hintAction». ${widget.isEditingProject ? 'Новые фото — через "Источники"' : 'Новые файлы — кнопки в шапке'}',
-                        style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted, height: 1.3),
+                        style: GoogleFonts.manrope(
+                            fontSize: 12,
+                            color: AppColors.textMuted,
+                            height: 1.3),
                       ),
                     ),
                   ],

@@ -4,7 +4,7 @@ import 'dart:math' as math;
 import 'package:android_intent_plus/android_intent.dart';
 import 'package:audio_video_progress_bar/audio_video_progress_bar.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // ✅ Добавлено для HapticFeedback
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:just_audio/just_audio.dart';
@@ -17,7 +17,6 @@ import '../../data/providers/project_provider.dart';
 import '../../data/services/bundled_music_service.dart';
 import '../../data/services/media_storage_service.dart';
 
-/// Формат секунд: "0:05" или "1:23"
 String _fmtSec(double sec) {
   final total = sec.round();
   final m = total ~/ 60;
@@ -25,7 +24,6 @@ String _fmtSec(double sec) {
   return '$m:${s.toString().padLeft(2, '0')}';
 }
 
-/// Общая длительность видео проекта в миллисекундах
 int _totalVideoDurationMs(WidgetRef ref) {
   return ref
       .read(currentProjectProvider)
@@ -33,9 +31,6 @@ int _totalVideoDurationMs(WidgetRef ref) {
       .fold<int>(0, (sum, p) => sum + p.durationMilliseconds);
 }
 
-// ==========================================
-// ✅ Проверка: загружен ли в плеер указанный файл
-// ==========================================
 bool isPlayerLoadedWith(AudioPlayer player, String path) {
   final src = player.audioSource;
   if (src is UriAudioSource) {
@@ -44,9 +39,6 @@ bool isPlayerLoadedWith(AudioPlayer player, String path) {
   return false;
 }
 
-// ==========================================
-// Bottom sheet: управление музыкой
-// ==========================================
 void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
   showModalBottomSheet(
     context: context,
@@ -58,8 +50,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
     builder: (sheetContext) {
       final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
       final project = ref.read(currentProjectProvider);
-      final canSyncBeat =
-          project.audioTrack != null && project.photos.isNotEmpty;
+      final canSyncBeat = project.audioTrack != null && project.photos.isNotEmpty;
 
       return SafeArea(
         top: false,
@@ -90,7 +81,6 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                 ),
               ),
               const SizedBox(height: 16),
-
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -108,9 +98,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   ),
                 ),
               ),
-
               const SizedBox(height: 12),
-
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -128,9 +116,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   ),
                 ),
               ),
-
               const SizedBox(height: 12),
-
               Row(
                 children: [
                   Expanded(
@@ -167,9 +153,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   ),
                 ],
               ),
-
               const SizedBox(height: 12),
-
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -201,9 +185,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                     ),
                   ),
                 ),
-
               const SizedBox(height: 12),
-
               SizedBox(
                 width: double.infinity,
                 child: TextButton.icon(
@@ -212,14 +194,13 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                     await _openSystemFileManager(context);
                   },
                   icon: const Icon(Icons.folder_special_outlined, size: 20),
-                  label: const Text('Открыть «Мои файлы» (скопировать файлы)'),
+                  label: const Text('Открыть «Мои файлы»'),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.textMuted,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
                 ),
               ),
-
               const SizedBox(height: 16),
               const _CurrentTrackWidget(),
             ],
@@ -235,11 +216,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
   });
 }
 
-// ==========================================
-// ✅ Музыка из медиатеки (встроенные + импортированные треки)
-// ==========================================
-Future<void> _showMediaLibraryMusicSheet(
-    BuildContext context, WidgetRef ref) async {
+Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) async {
   final storage = ref.read(mediaStorageProvider);
   final files = storage.listMusic();
 
@@ -285,13 +262,8 @@ Future<void> _showMediaLibraryMusicSheet(
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    files.isEmpty
-                        ? 'Медиатека пуста — загрузи треки кнопкой 🎵'
-                        : 'Треков: ${files.length}',
-                    style: GoogleFonts.manrope(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                    ),
+                    files.isEmpty ? 'Медиатека пуста' : 'Треков: ${files.length}',
+                    style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -299,23 +271,15 @@ Future<void> _showMediaLibraryMusicSheet(
             const Divider(height: 1),
             Expanded(
               child: files.isEmpty
-                  ? Center(
+                  ? const Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(32),
+                        padding: EdgeInsets.all(32),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.music_off,
-                                size: 48, color: AppColors.textMuted),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Сначала загрузи музыку в медиатеку',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                color: AppColors.textMuted,
-                              ),
-                            ),
+                            Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
+                            SizedBox(height: 12),
+                            Text('Загрузи треки через кнопку 🎵 в шапке', textAlign: TextAlign.center, style: TextStyle(color: AppColors.textMuted)),
                           ],
                         ),
                       ),
@@ -323,14 +287,12 @@ Future<void> _showMediaLibraryMusicSheet(
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: files.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 68),
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
                       itemBuilder: (context, index) {
                         final file = files[index];
                         final name = MediaStorageService.displayName(file);
                         final isBundled = BundledMusicService.isBundled(file);
                         
-                        // ✅ ИСПРАВЛЕНО: Замена ListTile на InkWell + Padding для корректного ripple-эффекта
                         return InkWell(
                           onTap: () {
                             Navigator.pop(sheetContext);
@@ -363,21 +325,9 @@ Future<void> _showMediaLibraryMusicSheet(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        name,
-                                        style: GoogleFonts.manrope(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.textPrimary,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      Text(name, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
                                       const SizedBox(height: 2),
-                                      Text(
-                                        isBundled ? '✨ Встроенный' : MediaStorageService.formatBytes(file),
-                                        style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
-                                      ),
+                                      Text(isBundled ? '✨ Встроенный' : MediaStorageService.formatBytes(file), style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted)),
                                     ],
                                   ),
                                 ),
@@ -396,9 +346,6 @@ Future<void> _showMediaLibraryMusicSheet(
   );
 }
 
-// ==========================================
-// ⚡ Синхронизация длительностей кадров по битам музыки
-// ==========================================
 Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   final project = ref.read(currentProjectProvider);
   final track = project.audioTrack;
@@ -410,17 +357,13 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
     builder: (_) => Center(
       child: Container(
         padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const CircularProgressIndicator(color: AppColors.primary),
             const SizedBox(height: 16),
-            Text('Анализирую биты…',
-                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+            Text('Анализирую биты…', style: GoogleFonts.manrope(color: AppColors.textPrimary)),
           ],
         ),
       ),
@@ -434,18 +377,12 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
 
   if (!analysis.isValid) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Не удалось определить биты в этом треке'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 3),
-      ),
+      const SnackBar(content: Text('Не удалось определить биты в этом треке'), backgroundColor: Colors.orange, duration: Duration(seconds: 3)),
     );
     return;
   }
 
   final notifier = ref.read(currentProjectProvider.notifier);
-  
-  // ✅ ИСПРАВЛЕНО: Пакетный режим для Undo (всё = 1 шаг)
   notifier.beginBatch();
   try {
     const beatsPerPhoto = 2;
@@ -463,14 +400,9 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
     }
 
     if (context.mounted) {
-      HapticFeedback.heavyImpact(); // ✅ Тактильный отклик
+      HapticFeedback.heavyImpact();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              '⚡ Синхронизировано кадров: $synced • BPM ~${analysis.bpm.round()}'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
+        SnackBar(content: Text('⚡ Синхронизировано кадров: $synced • BPM ~${analysis.bpm.round()}'), backgroundColor: Colors.green, duration: const Duration(seconds: 3)),
       );
     }
   } finally {
@@ -478,9 +410,6 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   }
 }
 
-// ==========================================
-// ✅ Встроенный список музыки устройства
-// ==========================================
 Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
   showDialog(
     context: context,
@@ -488,17 +417,13 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
     builder: (loadingContext) => Center(
       child: Container(
         padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const CircularProgressIndicator(color: AppColors.primary),
             const SizedBox(height: 16),
-            Text('Поиск музыки…',
-                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+            Text('Поиск музыки…', style: GoogleFonts.manrope(color: AppColors.textPrimary)),
           ],
         ),
       ),
@@ -513,12 +438,7 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
 
   if (!granted) {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Нет разрешения на чтение музыки. '
-            'Разрешите доступ в настройках приложения.'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 5),
-      ),
+      const SnackBar(content: Text('Нет разрешения на чтение музыки'), backgroundColor: Colors.orange, duration: Duration(seconds: 5)),
     );
     return;
   }
@@ -527,9 +447,7 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
     context: context,
     backgroundColor: AppColors.surface,
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
     builder: (sheetContext) {
       final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
 
@@ -549,81 +467,36 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
                       width: 40,
                       height: 4,
                       margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceLight,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
+                      decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(2)),
                     ),
                   ),
-                  Text(
-                    'Музыка на устройстве',
-                    style: GoogleFonts.unbounded(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
+                  Text('Музыка на устройстве', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                   const SizedBox(height: 4),
-                  Text(
-                    tracks.isEmpty
-                        ? 'Ничего не найдено в папках Music и Download'
-                        : 'Найдено треков: ${tracks.length}',
-                    style: GoogleFonts.manrope(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
+                  Text(tracks.isEmpty ? 'Ничего не найдено' : 'Найдено треков: ${tracks.length}', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
                 ],
               ),
             ),
             const Divider(height: 1),
             Expanded(
               child: tracks.isEmpty
-                  ? Center(
+                  ? const Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.music_off,
-                                size: 48, color: AppColors.textMuted),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Скопируйте музыку в папку Music или Download, '
-                              'затем нажмите «Обновить»',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                color: AppColors.textMuted,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton.icon(
-                              onPressed: () {
-                                Navigator.pop(sheetContext);
-                                _showDeviceMusicSheet(context, ref);
-                              },
-                              icon: const Icon(Icons.refresh),
-                              label: const Text('Обновить'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.primary,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
+                        padding: EdgeInsets.all(32),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
+                          SizedBox(height: 12),
+                          Text('Скопируйте музыку в папку Music или Download', textAlign: TextAlign.center, style: TextStyle(color: AppColors.textMuted)),
+                        ]),
                       ),
                     )
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: tracks.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 68),
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
                       itemBuilder: (context, index) {
                         final track = tracks[index];
                         final folder = _folderOf(track.filePath);
                         
-                        // ✅ ИСПРАВЛЕНО: Замена ListTile на InkWell + Padding
                         return InkWell(
                           onTap: () {
                             Navigator.pop(sheetContext);
@@ -637,10 +510,7 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
                                 Container(
                                   width: 44,
                                   height: 44,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
+                                  decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
                                   child: const Icon(Icons.music_note, color: AppColors.primary),
                                 ),
                                 const SizedBox(width: 12),
@@ -648,26 +518,9 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        track.title,
-                                        style: GoogleFonts.manrope(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.textPrimary,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      Text(track.title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
                                       const SizedBox(height: 2),
-                                      Text(
-                                        folder,
-                                        style: GoogleFonts.manrope(
-                                          fontSize: 11,
-                                          color: AppColors.textMuted,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      Text(folder, style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
                                     ],
                                   ),
                                 ),
@@ -686,79 +539,54 @@ Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
   );
 }
 
-/// Короткое имя папки для подписи
 String _folderOf(String path) {
   final parts = path.split('/');
   if (parts.length < 2) return path;
   return parts[parts.length - 2];
 }
 
-// ==========================================
-// Открытие системного файлового менеджера
-// ==========================================
 Future<void> _openSystemFileManager(BuildContext context) async {
-  final intent = AndroidIntent(
-    action: 'android.intent.action.VIEW',
-    data: 'content://com.android.externalstorage.documents/root/primary',
-  );
-
+  final intent = AndroidIntent(action: 'android.intent.action.VIEW', data: 'content://com.android.externalstorage.documents/root/primary');
   try {
     await intent.launch();
     return;
   } catch (e) {
     print('DocumentsUI не запустился: $e');
   }
-
-  try {
-    final intent2 = AndroidIntent(
-      action: 'android.intent.action.VIEW',
-      data: 'file:///storage/emulated/0',
-      type: 'resource/folder',
-    );
-    await intent2.launch();
-    return;
-  } catch (e) {
-    print('file:// URI не сработал: $e');
-  }
-
   if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Не удалось открыть проводник.'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 4),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось открыть проводник.'), backgroundColor: Colors.orange));
   }
 }
 
-// ==========================================
-// Копирование трека в папку проекта music/
-// ==========================================
+// ✅ УСИЛЕННАЯ ВЕРСИЯ С ОБРАБОТКОЙ ОШИБОК
 Future<AudioTrack> _storeTrack(WidgetRef ref, AudioTrack track) async {
-  final storage = ref.read(mediaStorageProvider);
-  final musicDirPath = storage.musicDir.path;
+  try {
+    final storage = ref.read(mediaStorageProvider);
+    final musicDirPath = storage.musicDir.path;
 
-  if (track.filePath.startsWith(musicDirPath)) return track;
+    if (track.filePath.startsWith(musicDirPath)) return track;
 
-  final storedPath =
-      await storage.importMusic(track.filePath, title: track.title);
+    final storedPath = await storage.importMusic(track.filePath, title: track.title);
+    
+    if (storedPath == null || storedPath.isEmpty) {
+      throw Exception('importMusic вернул пустой путь');
+    }
 
-  if (track.isFromInternet) {
-    try {
-      final original = File(track.filePath);
-      if (original.existsSync()) original.deleteSync();
-    } catch (_) {}
+    if (track.isFromInternet) {
+      try {
+        final original = File(track.filePath);
+        if (original.existsSync()) original.deleteSync();
+      } catch (_) {}
+    }
+
+    return track.copyWith(filePath: storedPath);
+  } catch (e) {
+    print('❌ Ошибка в _storeTrack: $e');
+    rethrow; // Пробрасываем ошибку дальше, чтобы показать SnackBar
   }
-
-  return track.copyWith(filePath: storedPath);
 }
 
-// ==========================================
-// Предпросмотр трека перед добавлением
-// ==========================================
-Future<void> _showAudioPreviewDialog(
-    BuildContext context, WidgetRef ref, AudioTrack track) async {
+Future<void> _showAudioPreviewDialog(BuildContext context, WidgetRef ref, AudioTrack track) async {
   final player = ref.read(audioPlayerProvider);
   final totalVideoMs = _totalVideoDurationMs(ref);
   bool added = false;
@@ -774,28 +602,13 @@ Future<void> _showAudioPreviewDialog(
     builder: (dialogContext) => AlertDialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text(
-        'Предпросмотр',
-        style: GoogleFonts.unbounded(
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
-      ),
+      title: Text('Предпросмотр', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.music_note, size: 64, color: AppColors.primary),
           const SizedBox(height: 16),
-          Text(
-            track.title,
-            style: GoogleFonts.manrope(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-            textAlign: TextAlign.center,
-          ),
+          Text(track.title, style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary), textAlign: TextAlign.center),
           const SizedBox(height: 16),
           StreamBuilder<Duration>(
             stream: player.positionStream,
@@ -818,28 +631,15 @@ Future<void> _showAudioPreviewDialog(
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceLight,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.3)),
-            ),
+            decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.primary.withOpacity(0.3))),
             child: Row(
               children: [
-                const Icon(Icons.info_outline,
-                    size: 18, color: AppColors.textMuted),
+                const Icon(Icons.info_outline, size: 18, color: AppColors.textMuted),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    totalVideoMs > 0
-                        ? 'Длительность видео: ${_fmtSec(totalVideoMs / 1000)}. '
-                            'Трек будет обрезан автоматически.'
-                        : 'В видео пока нет кадров — трек ляжет с начала.',
-                    style: GoogleFonts.manrope(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                      height: 1.3,
-                    ),
+                    totalVideoMs > 0 ? 'Длительность видео: ${_fmtSec(totalVideoMs / 1000)}. Трек будет обрезан.' : 'В видео пока нет кадров.',
+                    style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textSecondary, height: 1.3),
                   ),
                 ),
               ],
@@ -848,28 +648,37 @@ Future<void> _showAudioPreviewDialog(
         ],
       ),
       actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.pop(dialogContext);
-          },
-          child: Text('Отмена',
-              style: GoogleFonts.manrope(color: AppColors.textMuted)),
-        ),
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted))),
         ElevatedButton(
           onPressed: () async {
-            added = true;
-            await player.stop();
-            ref.read(isAudioPlayingProvider.notifier).state = false;
-            final stored = await _storeTrack(ref, track);
-            ref.read(currentProjectProvider.notifier).setAudioTrack(stored);
-            if (dialogContext.mounted) Navigator.pop(dialogContext);
+            try {
+              added = true;
+              await player.stop();
+              ref.read(isAudioPlayingProvider.notifier).state = false;
+              
+              // ✅ Явное сохранение и применение
+              final stored = await _storeTrack(ref, track);
+              ref.read(currentProjectProvider.notifier).setAudioTrack(stored);
+              
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+              
+              // ✅ Явное уведомление об успехе
+              if (context.mounted) {
+                HapticFeedback.mediumImpact();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('✅ Музыка «${stored.title}» добавлена в проект!'), backgroundColor: Colors.green),
+                );
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('❌ Ошибка добавления: $e'), backgroundColor: Colors.red),
+                );
+              }
+            }
           },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-          ),
-          child: Text('Добавить',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+          child: Text('Добавить', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
         ),
       ],
     ),
@@ -877,31 +686,16 @@ Future<void> _showAudioPreviewDialog(
 
   await player.stop();
   ref.read(isAudioPlayingProvider.notifier).state = false;
-
-  if (added && context.mounted) {
-    showAudioManagerSheet(context, ref);
-  }
 }
 
-// ==========================================
-// Ввод URL для скачивания
-// ==========================================
 void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
   final controller = TextEditingController();
-
   showDialog(
     context: context,
     builder: (dialogContext) => AlertDialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text(
-        'Скачать из интернета',
-        style: GoogleFonts.unbounded(
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
-      ),
+      title: Text('Скачать из интернета', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
       content: TextField(
         controller: controller,
         style: const TextStyle(color: AppColors.textPrimary),
@@ -910,18 +704,11 @@ void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
           hintStyle: TextStyle(color: AppColors.textMuted.withOpacity(0.6)),
           filled: true,
           fillColor: AppColors.surfaceLight,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: Text('Отмена',
-              style: GoogleFonts.manrope(color: AppColors.textMuted)),
-        ),
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted))),
         ElevatedButton(
           onPressed: () async {
             final url = controller.text.trim();
@@ -934,21 +721,12 @@ void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
               builder: (loadingContext) => Center(
                 child: Container(
                   padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const CircularProgressIndicator(
-                          color: AppColors.primary),
-                      const SizedBox(height: 16),
-                      Text('Скачивание…',
-                          style:
-                              GoogleFonts.manrope(color: AppColors.textPrimary)),
-                    ],
-                  ),
+                  decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    const CircularProgressIndicator(color: AppColors.primary),
+                    const SizedBox(height: 16),
+                    Text('Скачивание…', style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+                  ]),
                 ),
               ),
             );
@@ -960,36 +738,24 @@ void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
               if (track != null) {
                 _showAudioPreviewDialog(context, ref, track);
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Ошибка скачивания'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка скачивания'), backgroundColor: Colors.red));
               }
             }
           },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-          ),
-          child: Text('Скачать',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+          child: Text('Скачать', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
         ),
       ],
     ),
   );
 }
 
-// ==========================================
-// ✅ Текущий трек проекта на ГЛОБАЛЬНОМ плеере
-// ==========================================
 class _CurrentTrackWidget extends ConsumerWidget {
   const _CurrentTrackWidget();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final project = ref.watch(currentProjectProvider);
+    final project = ref.watch(currentProjectProvider); // ✅ Следим за изменениями
     final track = project.audioTrack;
     final player = ref.read(audioPlayerProvider);
     final isPlaying = ref.watch(isAudioPlayingProvider);
@@ -998,10 +764,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            'Музыка не добавлена',
-            style: GoogleFonts.manrope(color: AppColors.textMuted),
-          ),
+          child: Text('Музыка не добавлена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
         ),
       );
     }
@@ -1012,11 +775,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
 
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceLight,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-      ),
+      decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.primary.withOpacity(0.2))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1025,16 +784,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
               const Icon(Icons.music_note, color: AppColors.primary, size: 28),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  track.title,
-                  style: GoogleFonts.manrope(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(track.title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
               ),
               GestureDetector(
                 onTap: () async {
@@ -1043,12 +793,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
                     ref.read(isAudioPlayingProvider.notifier).state = false;
                   } else {
                     if (!isPlayerLoadedWith(player, track.filePath)) {
-                      try {
-                        await player.setFilePath(track.filePath);
-                      } catch (e) {
-                        print('❌ Ошибка загрузки трека: $e');
-                        return;
-                      }
+                      try { await player.setFilePath(track.filePath); } catch (e) { return; }
                     }
                     await player.setVolume(track.volume);
                     await player.play();
@@ -1056,17 +801,8 @@ class _CurrentTrackWidget extends ConsumerWidget {
                   }
                 },
                 child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: const BoxDecoration(
-                    color: AppColors.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
-                    size: 26,
-                  ),
+                  width: 44, height: 44, decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
+                  child: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: Colors.white, size: 26),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1080,9 +816,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
               ),
             ],
           ),
-
           const SizedBox(height: 12),
-
           StreamBuilder<Duration>(
             stream: player.positionStream,
             builder: (context, posSnap) {
@@ -1096,28 +830,19 @@ class _CurrentTrackWidget extends ConsumerWidget {
                     progressBarColor: AppColors.primary,
                     baseBarColor: AppColors.surfaceLight,
                     thumbColor: AppColors.primary,
-                    timeLabelTextStyle: GoogleFonts.jetBrainsMono(
-                      fontSize: 10,
-                      color: AppColors.textMuted,
-                    ),
+                    timeLabelTextStyle: GoogleFonts.jetBrainsMono(fontSize: 10, color: AppColors.textMuted),
                   );
                 },
               );
             },
           ),
-
           const SizedBox(height: 8),
-
           Row(
             children: [
               const Icon(Icons.volume_down, color: AppColors.textMuted, size: 20),
               Expanded(
                 child: Slider(
-                  value: track.volume,
-                  min: 0.0,
-                  max: 1.0,
-                  activeColor: AppColors.primary,
-                  inactiveColor: AppColors.surfaceLight,
+                  value: track.volume, min: 0.0, max: 1.0, activeColor: AppColors.primary, inactiveColor: AppColors.surfaceLight,
                   onChanged: (value) {
                     ref.read(currentProjectProvider.notifier).updateAudioVolume(value);
                     player.setVolume(value);
@@ -1126,20 +851,9 @@ class _CurrentTrackWidget extends ConsumerWidget {
               ),
               const Icon(Icons.volume_up, color: AppColors.textMuted, size: 20),
               const SizedBox(width: 8),
-              SizedBox(
-                width: 44,
-                child: Text(
-                  '${(track.volume * 100).round()}%',
-                  style: GoogleFonts.jetBrainsMono(
-                    fontSize: 12,
-                    color: AppColors.primary,
-                  ),
-                  textAlign: TextAlign.right,
-                ),
-              ),
+              SizedBox(width: 44, child: Text('${(track.volume * 100).round()}%', style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary), textAlign: TextAlign.right)),
             ],
           ),
-
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1147,43 +861,18 @@ class _CurrentTrackWidget extends ConsumerWidget {
                 children: [
                   const Icon(Icons.schedule, color: AppColors.textMuted, size: 18),
                   const SizedBox(width: 6),
-                  Text(
-                    'Задержка старта',
-                    style: GoogleFonts.manrope(
-                      fontSize: 13,
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  Text('Задержка старта', style: GoogleFonts.manrope(fontSize: 13, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
                 ],
               ),
-              Text(
-                '${_fmtSec(clampedStart)} / ${_fmtSec(maxStart)}',
-                style: GoogleFonts.jetBrainsMono(
-                  fontSize: 12,
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              Text('${_fmtSec(clampedStart)} / ${_fmtSec(maxStart)}', style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600)),
             ],
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              'Через сколько секунд видео начнёт играть трек',
-              style: GoogleFonts.manrope(
-                fontSize: 11,
-                color: AppColors.textMuted,
-              ),
-            ),
+            child: Text('Через сколько секунд видео начнёт играть трек', style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted)),
           ),
           Slider(
-            value: clampedStart,
-            min: 0.0,
-            max: maxStart > 0 ? maxStart : 1.0,
-            divisions: maxStart > 0 ? (maxStart * 2).round() : 1,
-            activeColor: AppColors.primary,
-            inactiveColor: AppColors.surfaceLight,
+            value: clampedStart, min: 0.0, max: maxStart > 0 ? maxStart : 1.0, divisions: maxStart > 0 ? (maxStart * 2).round() : 1, activeColor: AppColors.primary, inactiveColor: AppColors.surfaceLight,
             onChanged: (value) {
               ref.read(currentProjectProvider.notifier).updateAudioStartTime(value);
             },
@@ -1194,33 +883,19 @@ class _CurrentTrackWidget extends ConsumerWidget {
   }
 }
 
-// ==========================================
-// 🎵 Публичная обёртка: браузер музыки устройства
-// ==========================================
-Future<void> showDeviceMusicBrowser(
-  BuildContext context,
-  WidgetRef ref, {
-  bool importOnly = false,
-}) async {
+Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref, {bool importOnly = false}) async {
   showDialog(
     context: context,
     barrierDismissible: false,
     builder: (loadingContext) => Center(
       child: Container(
         padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: AppColors.primary),
-            const SizedBox(height: 16),
-            Text('Поиск музыки…',
-                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
-          ],
-        ),
+        decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const CircularProgressIndicator(color: AppColors.primary),
+          const SizedBox(height: 16),
+          Text('Поиск музыки…', style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+        ]),
       ),
     ),
   );
@@ -1232,13 +907,7 @@ Future<void> showDeviceMusicBrowser(
   Navigator.pop(context);
 
   if (!granted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Нет разрешения на чтение музыки'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 4),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Нет разрешения на чтение музыки'), backgroundColor: Colors.orange, duration: Duration(seconds: 4)));
     return;
   }
 
@@ -1246,9 +915,7 @@ Future<void> showDeviceMusicBrowser(
     context: context,
     backgroundColor: AppColors.surface,
     isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
     builder: (sheetContext) {
       final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
 
@@ -1264,71 +931,35 @@ Future<void> showDeviceMusicBrowser(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceLight,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
+                    child: Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 16), decoration: BoxDecoration(color: AppColors.surfaceLight, borderRadius: BorderRadius.circular(2))),
                   ),
-                  Text(
-                    'Музыка на устройстве',
-                    style: GoogleFonts.unbounded(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
+                  Text('Музыка на устройстве', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                   const SizedBox(height: 4),
-                  Text(
-                    tracks.isEmpty
-                        ? 'Ничего не найдено'
-                        : 'Найдено треков: ${tracks.length}',
-                    style: GoogleFonts.manrope(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
+                  Text(tracks.isEmpty ? 'Ничего не найдено' : 'Найдено треков: ${tracks.length}', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
                 ],
               ),
             ),
             const Divider(height: 1),
             Expanded(
               child: tracks.isEmpty
-                  ? Center(
+                  ? const Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.music_off,
-                                size: 48, color: AppColors.textMuted),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Скопируйте музыку в папку Music или Download',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                color: AppColors.textMuted,
-                              ),
-                            ),
-                          ],
-                        ),
+                        padding: EdgeInsets.all(32),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
+                          SizedBox(height: 12),
+                          Text('Скопируйте музыку в папку Music или Download', textAlign: TextAlign.center, style: TextStyle(color: AppColors.textMuted)),
+                        ]),
                       ),
                     )
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: tracks.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 68),
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
                       itemBuilder: (context, index) {
                         final track = tracks[index];
                         final folder = _folderOf(track.filePath);
                         
-                        // ✅ ИСПРАВЛЕНО: Замена ListTile на InkWell + Padding
                         return InkWell(
                           onTap: () async {
                             Navigator.pop(sheetContext);
@@ -1339,38 +970,15 @@ Future<void> showDeviceMusicBrowser(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Row(
                               children: [
-                                Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    color: AppColors.primary.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(Icons.music_note, color: AppColors.primary),
-                                ),
+                                Container(width: 44, height: 44, decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.15), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.music_note, color: AppColors.primary)),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        track.title,
-                                        style: GoogleFonts.manrope(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.textPrimary,
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      Text(track.title, style: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary), maxLines: 1, overflow: TextOverflow.ellipsis),
                                       const SizedBox(height: 2),
-                                      Text(
-                                        folder,
-                                        style: GoogleFonts.manrope(
-                                          fontSize: 11,
-                                          color: AppColors.textMuted,
-                                        ),
-                                      ),
+                                      Text(folder, style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted)),
                                     ],
                                   ),
                                 ),
@@ -1389,16 +997,9 @@ Future<void> showDeviceMusicBrowser(
   );
 }
 
-/// Универсальный выбор трека: импорт в медиатеку или добавление в проект
-Future<void> _pickTrack(BuildContext context, WidgetRef ref,
-    AudioTrack track, bool importOnly) async {
+Future<void> _pickTrack(BuildContext context, WidgetRef ref, AudioTrack track, bool importOnly) async {
   final player = ref.read(audioPlayerProvider);
-
-  try {
-    await player.setFilePath(track.filePath);
-  } catch (e) {
-    print('❌ Ошибка загрузки превью: $e');
-  }
+  try { await player.setFilePath(track.filePath); } catch (e) { print('❌ Ошибка загрузки превью: $e'); }
 
   bool added = false;
 
@@ -1407,27 +1008,13 @@ Future<void> _pickTrack(BuildContext context, WidgetRef ref,
     builder: (dialogContext) => AlertDialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text(
-        'Предпросмотр',
-        style: GoogleFonts.unbounded(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary),
-      ),
+      title: Text('Предпросмотр', style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.music_note, size: 64, color: AppColors.primary),
           const SizedBox(height: 16),
-          Text(
-            track.title,
-            style: GoogleFonts.manrope(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
-            ),
-            textAlign: TextAlign.center,
-          ),
+          Text(track.title, style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary), textAlign: TextAlign.center),
           const SizedBox(height: 16),
           StreamBuilder<Duration>(
             stream: player.positionStream,
@@ -1435,14 +1022,7 @@ Future<void> _pickTrack(BuildContext context, WidgetRef ref,
               return StreamBuilder<Duration?>(
                 stream: player.durationStream,
                 builder: (context, durSnap) {
-                  return ProgressBar(
-                    progress: posSnap.data ?? Duration.zero,
-                    total: durSnap.data ?? Duration.zero,
-                    onSeek: (d) => player.seek(d),
-                    progressBarColor: AppColors.primary,
-                    baseBarColor: AppColors.surfaceLight,
-                    thumbColor: AppColors.primary,
-                  );
+                  return ProgressBar(progress: posSnap.data ?? Duration.zero, total: durSnap.data ?? Duration.zero, onSeek: (d) => player.seek(d), progressBarColor: AppColors.primary, baseBarColor: AppColors.surfaceLight, thumbColor: AppColors.primary);
                 },
               );
             },
@@ -1450,40 +1030,37 @@ Future<void> _pickTrack(BuildContext context, WidgetRef ref,
         ],
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: Text('Отмена',
-              style: GoogleFonts.manrope(color: AppColors.textMuted)),
-        ),
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted))),
         ElevatedButton(
           onPressed: () async {
             added = true;
             await player.stop();
             ref.read(isAudioPlayingProvider.notifier).state = false;
-            final stored = await _storeTrack(ref, track);
-
-            if (importOnly) {
-              if (dialogContext.mounted) Navigator.pop(dialogContext);
-              if (context.mounted) {
-                HapticFeedback.mediumImpact();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('🎵 «${stored.title}» добавлен в медиатеку'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+            
+            try {
+              final stored = await _storeTrack(ref, track);
+              if (importOnly) {
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                if (context.mounted) {
+                  HapticFeedback.mediumImpact();
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('🎵 «${stored.title}» добавлен в медиатеку'), backgroundColor: Colors.green));
+                }
+              } else {
+                ref.read(currentProjectProvider.notifier).setAudioTrack(stored);
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                if (context.mounted) {
+                  HapticFeedback.mediumImpact();
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('✅ Музыка добавлена в проект!'), backgroundColor: Colors.green));
+                }
               }
-            } else {
-              ref.read(currentProjectProvider.notifier).setAudioTrack(stored);
-              if (dialogContext.mounted) Navigator.pop(dialogContext);
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Ошибка: $e'), backgroundColor: Colors.red));
+              }
             }
           },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-          ),
-          child: Text(importOnly ? 'В медиатеку' : 'Добавить',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, foregroundColor: Colors.white),
+          child: Text(importOnly ? 'В медиатеку' : 'Добавить', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
         ),
       ],
     ),
@@ -1491,8 +1068,4 @@ Future<void> _pickTrack(BuildContext context, WidgetRef ref,
 
   await player.stop();
   ref.read(isAudioPlayingProvider.notifier).state = false;
-
-  if (!importOnly && added && context.mounted) {
-    showAudioManagerSheet(context, ref);
-  }
 }

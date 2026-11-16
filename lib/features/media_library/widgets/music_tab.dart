@@ -6,122 +6,125 @@ import 'package:just_audio/just_audio.dart';
 
 import '../../../core/theme/colors.dart';
 import '../../../data/services/media_storage_service.dart';
-import 'empty_state.dart';
 
-// ==========================================
-// Вкладка "Музыка": список треков медиатеки
-// с превью-воспроизведением
-// ==========================================
 class MusicTab extends StatelessWidget {
   final List<File> files;
-  final ValueChanged<File> onDelete;
-  final ValueChanged<String> onPlay;
-  final VoidCallback onStop;
+  final void Function(File) onDelete;
+  final void Function(String) onPlay;
+  final void Function() onStop;
   final String? playingPath;
   final AudioPlayer? player;
-  final ValueChanged<File>? onUse;
+  
+  // ✅ НОВЫЕ ПАРАМЕТРЫ
+  final String? selectedPath;
+  final void Function(File) onSelect;
 
   const MusicTab({
+    super.key,
     required this.files,
     required this.onDelete,
     required this.onPlay,
     required this.onStop,
     required this.playingPath,
     required this.player,
-    this.onUse,
+    this.selectedPath,
+    required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
     if (files.isEmpty) {
-      return const EmptyState(
-        icon: Icons.music_note_outlined,
-        title: 'Музыки пока нет',
-        subtitle: 'Нажмите «🎵» в шапке, чтобы загрузить треки',
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.music_off, size: 64, color: AppColors.textMuted),
+            const SizedBox(height: 16),
+            Text(
+              'Музыка пока не добавлена',
+              style: GoogleFonts.manrope(fontSize: 16, color: AppColors.textMuted),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Нажми 🎵 в правом верхнем углу',
+              style: GoogleFonts.manrope(fontSize: 14, color: AppColors.textMuted),
+            ),
+          ],
+        ),
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       itemCount: files.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (_, __) => const Divider(height: 1, indent: 16, endIndent: 16),
       itemBuilder: (context, index) {
         final file = files[index];
         final name = MediaStorageService.displayName(file);
-        final size = MediaStorageService.formatBytes(file);
-        final isPlaying = playingPath == file.path &&
-            player != null &&
-            player!.playing;
+        final isSelected = selectedPath == file.path;
+        final isPlaying = playingPath == file.path;
 
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isPlaying
-                  ? AppColors.primary
-                  : AppColors.primary.withValues(alpha: 0.1),
-              width: isPlaying ? 2 : 1,
+        return InkWell(
+          onTap: () {
+            // ✅ При тапе просто выбираем и играем, НЕ применяем к проекту
+            onSelect(file);
+          },
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isSelected ? AppColors.primary.withValues(alpha: 0.1) : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              border: isSelected 
+                  ? Border.all(color: AppColors.primary, width: 1.5) 
+                  : null,
             ),
-          ),
-          child: Row(
-            children: [
-              GestureDetector(
-                onTap: () => onPlay(file.path),
-                child: Container(
-                  width: 48,
-                  height: 48,
+            child: Row(
+              children: [
+                // Иконка: Нота или Эквалайзер (если играет)
+                Container(
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
+                    color: isSelected ? AppColors.primary : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
-                    isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: AppColors.primary,
-                    size: 28,
+                    isPlaying ? Icons.equalizer : Icons.music_note,
+                    color: isSelected ? Colors.white : AppColors.primary,
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: GoogleFonts.manrope(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: GoogleFonts.manrope(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isSelected ? AppColors.primary : AppColors.textPrimary,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      size,
-                      style: GoogleFonts.manrope(
-                        fontSize: 12,
-                        color: AppColors.textMuted,
+                      const SizedBox(height: 4),
+                      Text(
+                        MediaStorageService.formatBytes(file),
+                        style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              if (onUse != null)
+                // Кнопка удаления
                 IconButton(
-                  icon: const Icon(Icons.add_circle_outline,
-                      color: AppColors.primary, size: 22),
-                  tooltip: 'Добавить в проект',
-                  onPressed: () => onUse!(file),
+                  icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 22),
+                  onPressed: () => onDelete(file),
                 ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline,
-                    color: AppColors.error, size: 22),
-                onPressed: () => onDelete(file),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
