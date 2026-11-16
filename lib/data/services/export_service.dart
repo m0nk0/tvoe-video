@@ -5,13 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-
-// ❌ ОТКЛЮЧЕНО: Эти плагины вызывают конфликт compileSdk 33 vs 36 в Gradle.
-// В будущем заменим на нативный Platform Channel (MediaCodec).
-// import 'package:flutter_quick_video_encoder/flutter_quick_video_encoder.dart';
-// import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
-
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:gal/gal.dart';
 
@@ -36,10 +30,56 @@ class ExportResult {
   });
 }
 
-/// Сервис экспорта проекта в MP4 видео
+/// Сервис экспорта проекта в MP4 видео.
+/// Видео кодируется нативным Android MediaCodec (без сторонних плагинов).
 class ExportService {
   static const int _defaultFps = 30;
-  static const int _defaultBitrate = 5000000; // 5 Mbps
+
+  /// Канал нативного энкодера (см. MainActivity.kt / VideoEncoder.kt)
+  static const MethodChannel _channel =
+      MethodChannel('com.tvoymagazine.tvoe_video/exporter');
+
+  /// Последняя ошибка — чтобы UI показал реальную причину, а не «отменён»
+  static String? lastError;
+
+  /// Кэш декодированных фото. Рендер идёт последовательно, поэтому 3 хватает.
+  static final Map<String, ui.Image> _imageCache = {};
+  static const int _maxCachedImages = 3;
+
+  static int _bitrateFor(int width, int height) {
+    final b = (width * height * _defaultFps * 0.12).round();
+    return b.clamp(2500000, 12000000);
+  }
+
+  static void _clearImageCache() {
+    for (final img in _imageCache.values) {
+      try {
+        img.dispose();
+      } catch (_) {}
+    }
+    _imageCache.clear();
+  }
+
+  static Future<ui.Image?> _loadImage(String path) async {
+    final cached = _imageCache[path];
+    if (cached != null) return cached;
+
+    final file = File(path);
+    if (!file.existsSync()) return null;
+
+    final bytes = await file.readAsBytes();
+    final image = await decodeImageFromList(bytes);
+
+    _imageCache[path] = image;
+    while (_imageCache.length > _maxCachedImages) {
+      final oldestKey = _imageCache.keys.first;
+      final oldest = _imageCache.remove(oldestKey);
+      try {
+        oldest?.dispose();
+      } catch (_) {}
+    }
+    return image;
+  }
 
   static String _sanitizeFileName(String name) {
     var clean = name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
@@ -50,6 +90,26 @@ class ExportService {
     return clean.isEmpty ? 'Мой клип' : clean;
   }
 
+  static bool _moveFile(String from, String to) {
+    try {
+      final src = File(from);
+      if (!src.existsSync()) return false;
+      try {
+        src.renameSync(to);
+      } catch (_) {
+        src.copySync(to);
+        try {
+          src.deleteSync();
+        } catch (_) {}
+      }
+      final dst = File(to);
+      return dst.existsSync() && dst.lengthSync() > 1024;
+    } catch (e) {
+      print('❌ Не удалось переместить видео: $e');
+      return false;
+    }
+  }
+
   static Future<ExportResult?> exportVideo({
     required VideoProject project,
     VideoFormat? format,
@@ -57,7 +117,12 @@ class ExportService {
     Function(double)? onProgress,
     bool Function()? cancelChecker,
   }) async {
-    if (project.photos.isEmpty) return null;
+    lastError = null;
+
+    if (project.photos.isEmpty) {
+      lastError = 'В проекте нет кадров';
+      return null;
+    }
 
     final fmt = format ?? project.format;
     final width = fmt.width;
@@ -83,14 +148,10 @@ class ExportService {
         cancelChecker: cancelChecker,
       );
 
-      // Если рендер отключен (вернул null), завершаем экспорт с предупреждением
       if (silentResult == null) {
-        onProgress?.call(1.0);
-        return ExportResult(
-          videoPath: finalVideoPath,
-          hasAudio: false,
-          warning: 'Рендер видео временно отключен для стабилизации сборки.',
-        );
+        lastError ??= 'Экспорт отменён';
+        _cleanup([silentVideoPath]);
+        return null;
       }
 
       if (project.audioTrack != null) {
@@ -105,41 +166,44 @@ class ExportService {
         );
         onProgress?.call(1.0);
 
-        try {
-          final silentFile = File(silentVideoPath);
-          if (silentFile.existsSync()) silentFile.deleteSync();
-        } catch (_) {}
-
         if (mixed) {
+          // ✅ Удаляем немой файл ТОЛЬКО когда микс реально удался
+          _cleanup([silentVideoPath]);
           return ExportResult(videoPath: finalVideoPath, hasAudio: true);
-        } else {
-          try {
-            final silentFile = File(silentVideoPath);
-            if (silentFile.existsSync()) silentFile.renameSync(finalVideoPath);
-          } catch (_) {}
-          return ExportResult(
-            videoPath: finalVideoPath,
-            hasAudio: false,
-            warning: 'Не удалось добавить музыку. Видео сохранено без звука.',
-          );
         }
+
+        // ✅ Фикс: немой файл больше не удаляется до переименования
+        if (!_moveFile(silentVideoPath, finalVideoPath)) {
+          lastError = 'Не удалось подготовить файл видео';
+          _cleanup([silentVideoPath, finalVideoPath]);
+          return null;
+        }
+        return ExportResult(
+          videoPath: finalVideoPath,
+          hasAudio: false,
+          warning: 'Музыка появится на следующем этапе. Видео сохранено без звука.',
+        );
       } else {
         onProgress?.call(1.0);
-        try {
-          final silentFile = File(silentVideoPath);
-          if (silentFile.existsSync()) silentFile.renameSync(finalVideoPath);
-        } catch (_) {}
+        if (!_moveFile(silentVideoPath, finalVideoPath)) {
+          lastError = 'Не удалось подготовить файл видео';
+          _cleanup([silentVideoPath, finalVideoPath]);
+          return null;
+        }
         return ExportResult(videoPath: finalVideoPath, hasAudio: false);
       }
     } catch (e) {
       print('Ошибка экспорта видео: $e');
+      lastError = 'Ошибка экспорта: $e';
       _cleanup([silentVideoPath, finalVideoPath]);
       return null;
+    } finally {
+      _clearImageCache();
     }
   }
 
   // ==========================================
-  // ❌ ЗАГЛУШКА: Рендер отключен
+  // ✅ НАТИВНЫЙ РЕНДЕР: Flutter Canvas → MediaCodec H.264
   // ==========================================
   static Future<String?> _renderSilentVideo({
     required VideoProject project,
@@ -149,39 +213,41 @@ class ExportService {
     required Function(double) onProgress,
     bool Function()? cancelChecker,
   }) async {
-    print('⚠️ _renderSilentVideo: flutter_quick_video_encoder отключен для стабилизации Release.');
-    onProgress(1.0);
-    return null;
+    int totalFrames = 0;
+    for (final photo in project.photos) {
+      totalFrames += (_defaultFps * photo.durationMilliseconds / 1000).ceil();
+    }
+    if (totalFrames <= 0) {
+      lastError = 'Нулевая длительность проекта';
+      return null;
+    }
 
-    /* ОРИГИНАЛЬНЫЙ КОД (сохранен для будущего восстановления):
+    bool started = false;
     try {
-      await FlutterQuickVideoEncoder.setup(
-        width: width,
-        height: height,
-        fps: _defaultFps,
-        videoBitrate: _defaultBitrate,
-        profileLevel: ProfileLevel.any,
-        audioBitrate: 0,
-        audioChannels: 0,
-        sampleRate: 0,
-        filepath: outputPath,
-      );
-
-      int totalFrames = 0;
-      for (final photo in project.photos) {
-        totalFrames += (_defaultFps * photo.durationMilliseconds / 1000).ceil();
-      }
+      await _channel.invokeMethod('start', {
+        'width': width,
+        'height': height,
+        'fps': _defaultFps,
+        'bitrate': _bitrateFor(width, height),
+        'path': outputPath,
+      });
+      started = true;
 
       int renderedFrames = 0;
 
       for (int segIndex = 0; segIndex < project.photos.length; segIndex++) {
         final photo = project.photos[segIndex];
-        final framesForSegment = (_defaultFps * photo.durationMilliseconds / 1000).ceil();
+        final framesForSegment =
+            (_defaultFps * photo.durationMilliseconds / 1000).ceil();
+        if (framesForSegment <= 0) continue;
 
         for (int frameIndex = 0; frameIndex < framesForSegment; frameIndex++) {
           if (cancelChecker != null && cancelChecker()) {
-            await FlutterQuickVideoEncoder.finish();
+            try {
+              await _channel.invokeMethod('cancel');
+            } catch (_) {}
             _cleanup([outputPath]);
+            lastError = 'Экспорт отменён';
             return null;
           }
 
@@ -195,27 +261,45 @@ class ExportService {
             height: height,
           );
 
-          if (rgbaBytes != null) {
-            await FlutterQuickVideoEncoder.appendVideoFrame(rgbaBytes);
+          if (rgbaBytes == null) {
+            throw Exception('Не удалось отрисовать кадр $renderedFrames');
           }
+
+          await _channel.invokeMethod('feedFrame', rgbaBytes);
 
           renderedFrames++;
           onProgress(renderedFrames / totalFrames);
         }
       }
 
-      await FlutterQuickVideoEncoder.finish();
+      await _channel.invokeMethod('finish');
+
+      final file = File(outputPath);
+      if (!file.existsSync() || file.lengthSync() < 1024) {
+        lastError = 'Энкодер не создал файл видео';
+        _cleanup([outputPath]);
+        return null;
+      }
+
+      print('✅ Нативный рендер завершён: $renderedFrames кадров, '
+          '${(file.lengthSync() / 1024 / 1024).toStringAsFixed(2)} МБ');
       return outputPath;
     } catch (e) {
-      print('Ошибка рендера видео: $e');
+      print('❌ Ошибка нативного рендера: $e');
+      lastError = 'Ошибка кодирования видео: $e';
+      if (started) {
+        try {
+          await _channel.invokeMethod('cancel');
+        } catch (_) {}
+      }
       _cleanup([outputPath]);
       return null;
     }
-    */
   }
 
   // ==========================================
-  // ❌ ЗАГЛУШКА: FFmpeg отключен
+  // ⏳ ШАГ 2: микширование звука (MediaExtractor → PCM → AAC → MediaMuxer)
+  // Пока не реализовано — видео сохраняется без звука.
   // ==========================================
   static Future<bool> _mixWithAudio({
     required String videoPath,
@@ -225,40 +309,8 @@ class ExportService {
     required double startTime,
     required int totalDurationMs,
   }) async {
-    print('⚠️ _mixWithAudio: ffmpeg_kit отключен для стабилизации Release.');
+    print('⏳ _mixWithAudio: нативный муксер звука будет добавлен на Шаге 2.');
     return false;
-
-    /* ОРИГИНАЛЬНЫЙ КОД (сохранен для будущего восстановления):
-    try {
-      final audioFile = File(audioPath);
-      if (!audioFile.existsSync()) return false;
-
-      final totalSec = totalDurationMs / 1000.0;
-      final startSec = startTime.clamp(0.0, totalSec);
-      final availableSec = (totalSec - startSec).clamp(0.0, totalSec);
-
-      if (availableSec <= 0) return false;
-
-      final fadeStart = (availableSec - 1.0).clamp(0.0, availableSec);
-
-      final command =
-          '-ss $startSec -i "$audioPath" -i "$videoPath" -filter_complex "[0:a]atrim=0:${availableSec.toStringAsFixed(3)},asetpts=PTS-STARTPTS,volume=$volume,afade=t=out:st=${fadeStart.toStringAsFixed(2)}:d=1[a]" -map 1:v -map "[a]" -c:v copy -c:a aac -b:a 192k -shortest -t ${totalSec.toStringAsFixed(3)} "$outputPath"';
-
-      final session = await FFmpegKit.execute(command);
-      final returnCode = await session.getReturnCode();
-
-      if (ReturnCode.isSuccess(returnCode)) {
-        return true;
-      } else {
-        _cleanup([outputPath]);
-        return false;
-      }
-    } catch (e) {
-      print('Ошибка микширования FFmpeg: $e');
-      _cleanup([outputPath]);
-      return false;
-    }
-    */
   }
 
   static Future<Uint8List?> _renderFrame({
@@ -269,7 +321,8 @@ class ExportService {
     required int height,
   }) async {
     final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()));
+    final canvas = Canvas(
+        recorder, Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()));
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
@@ -299,8 +352,9 @@ class ExportService {
           .take(currentSegmentIndex)
           .fold<int>(0, (sum, photo) => sum + photo.durationMilliseconds);
       final elapsedMs = segmentStartMs +
-          (frameProgress * project.photos[currentSegmentIndex].durationMilliseconds).toInt();
-      
+          (frameProgress * project.photos[currentSegmentIndex].durationMilliseconds)
+              .toInt();
+
       paintOverlay(
         canvas,
         project.overlayType,
@@ -312,9 +366,15 @@ class ExportService {
     }
 
     final picture = recorder.endRecording();
-    final image = await picture.toImage(width, height);
-    final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
-    return byteData?.buffer.asUint8List();
+    ui.Image? image;
+    try {
+      image = await picture.toImage(width, height);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      return byteData?.buffer.asUint8List();
+    } finally {
+      image?.dispose();
+      picture.dispose();
+    }
   }
 
   static Future<void> _paintPhotoWithTransition(
@@ -326,11 +386,10 @@ class ExportService {
     required int height,
   }) async {
     final currentPhoto = project.photos[currentSegmentIndex];
-    final imageFile = File(currentPhoto.imagePath);
-    if (!imageFile.existsSync()) return;
 
-    final bytes = await imageFile.readAsBytes();
-    final uiImage = await decodeImageFromList(bytes);
+    // ✅ Кэш вместо декодирования JPEG на каждый кадр
+    final uiImage = await _loadImage(currentPhoto.imagePath);
+    if (uiImage == null) return;
 
     final imgWidth = uiImage.width.toDouble();
     final imgHeight = uiImage.height.toDouble();
@@ -348,11 +407,12 @@ class ExportService {
       offsetY: currentPhoto.offsetY,
     );
 
+    // 🎬 Ken Burns + Cinematic с интенсивностью
     final elapsedMsForMotion = frameProgress * currentPhoto.durationMilliseconds;
     final motionT = currentPhoto.durationMilliseconds > 0
         ? (elapsedMsForMotion / currentPhoto.durationMilliseconds).clamp(0.0, 1.0)
         : 1.0;
-        
+
     final cinematicResult = applyLiveMotionWithCinematic(
       dst,
       currentPhoto.liveMotion,
@@ -361,7 +421,8 @@ class ExportService {
     );
     final liveDst = cinematicResult.rect;
 
-    final colorFilter = ColorFilter.matrix(FilterPresets.matrix(currentPhoto.filter));
+    final colorFilter =
+        ColorFilter.matrix(FilterPresets.matrix(currentPhoto.filter));
 
     final elapsedMs = frameProgress * currentPhoto.durationMilliseconds;
     final rawT = currentPhoto.entranceDurationMs > 0
@@ -369,7 +430,8 @@ class ExportService {
         : 1.0;
     final entranceT = Curves.easeOut.transform(rawT);
 
-    final transitionMs = currentPhoto.transitionDurationMs.clamp(300, 1500).toDouble();
+    final transitionMs =
+        currentPhoto.transitionDurationMs.clamp(300, 1500).toDouble();
     final tp = currentPhoto.durationMilliseconds > 0
         ? (elapsedMs / transitionMs).clamp(0.0, 1.0)
         : 1.0;
@@ -379,8 +441,11 @@ class ExportService {
     canvas.save();
 
     switch (currentPhoto.entranceAnimation) {
-      case EntranceAnimation.none: break;
-      case EntranceAnimation.fadeIn: entranceOpacity *= entranceT; break;
+      case EntranceAnimation.none:
+        break;
+      case EntranceAnimation.fadeIn:
+        entranceOpacity *= entranceT;
+        break;
       case EntranceAnimation.slideFromLeft:
         canvas.translate(-100 * (1 - entranceT), 0);
         entranceOpacity *= entranceT;
@@ -410,13 +475,15 @@ class ExportService {
     Paint photoPaint(double extraOpacity) {
       return Paint()
         ..colorFilter = colorFilter
-        ..color = Colors.white.withOpacity((entranceOpacity * extraOpacity).clamp(0.0, 1.0));
+        ..color = Colors.white
+            .withOpacity((entranceOpacity * extraOpacity).clamp(0.0, 1.0));
     }
 
     if (currentPhoto.fitMode == FitMode.contain) {
       if (currentPhoto.backgroundType == BackgroundType.blur) {
         final sigma = (0.06 * width).clamp(24.0, 90.0);
-        final bgScale = PhotoFitCalculator.coverScale(image: imageSize, canvas: canvasSize);
+        final bgScale =
+            PhotoFitCalculator.coverScale(image: imageSize, canvas: canvasSize);
         final bgRect = Rect.fromCenter(
           center: Offset(width / 2, height / 2),
           width: imgWidth * bgScale,
@@ -425,24 +492,31 @@ class ExportService {
         canvas.save();
         canvas.clipRect(fullRect);
         canvas.drawImageRect(
-          uiImage, srcRect, bgRect,
+          uiImage,
+          srcRect,
+          bgRect,
           Paint()
             ..colorFilter = colorFilter
             ..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma)
             ..color = Colors.white.withOpacity(entranceOpacity),
         );
-        canvas.drawRect(fullRect, Paint()..color = Colors.black.withOpacity(0.25 * entranceOpacity));
+        canvas.drawRect(fullRect,
+            Paint()..color = Colors.black.withOpacity(0.25 * entranceOpacity));
         canvas.restore();
       } else {
         canvas.drawRect(
           fullRect,
           Paint()
             ..colorFilter = colorFilter
-            ..color = Color(currentPhoto.backgroundColor).withOpacity(entranceOpacity),
+            ..color =
+                Color(currentPhoto.backgroundColor).withOpacity(entranceOpacity),
         );
       }
     }
 
+    // ==========================================
+    // Переход (фото рисуется в liveDst с учётом Ken Burns + Cinematic)
+    // ==========================================
     switch (currentPhoto.transition) {
       case TransitionType.none:
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
@@ -454,7 +528,8 @@ class ExportService {
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
         final fadeAlpha = (1.0 - tp).clamp(0.0, 1.0);
         if (fadeAlpha > 0) {
-          canvas.drawRect(fullRect, Paint()..color = Colors.black.withOpacity(fadeAlpha));
+          canvas.drawRect(
+              fullRect, Paint()..color = Colors.black.withOpacity(fadeAlpha));
         }
         break;
 
@@ -496,7 +571,8 @@ class ExportService {
         break;
 
       case TransitionType.wipe:
-        canvas.clipRect(Rect.fromLTWH(0, 0, width.toDouble() * tp, height.toDouble()));
+        canvas.clipRect(
+            Rect.fromLTWH(0, 0, width.toDouble() * tp, height.toDouble()));
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
         break;
 
@@ -505,15 +581,25 @@ class ExportService {
           final o = (1.0 - tp * 2) * 10.0;
           canvas.save();
           canvas.translate(o, 0);
-          canvas.drawImageRect(uiImage, srcRect, liveDst, Paint()
-            ..colorFilter = const ColorFilter.mode(Color(0xFFFF0000), BlendMode.srcATop)
-            ..color = Colors.white.withOpacity(0.7));
+          canvas.drawImageRect(
+              uiImage,
+              srcRect,
+              liveDst,
+              Paint()
+                ..colorFilter = const ColorFilter.mode(
+                    Color(0xFFFF0000), BlendMode.srcATop)
+                ..color = Colors.white.withOpacity(0.7));
           canvas.restore();
           canvas.save();
           canvas.translate(-o, 0);
-          canvas.drawImageRect(uiImage, srcRect, liveDst, Paint()
-            ..colorFilter = const ColorFilter.mode(Color(0xFF00FF00), BlendMode.srcATop)
-            ..color = Colors.white.withOpacity(0.7));
+          canvas.drawImageRect(
+              uiImage,
+              srcRect,
+              liveDst,
+              Paint()
+                ..colorFilter = const ColorFilter.mode(
+                    Color(0xFF00FF00), BlendMode.srcATop)
+                ..color = Colors.white.withOpacity(0.7));
           canvas.restore();
         }
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
@@ -523,8 +609,13 @@ class ExportService {
         final wpPos = _easeInOutCubic(tp);
         final wpBlur = math.sin(math.pi * tp) * (width * 0.02);
         canvas.translate(width * (1 - wpPos), 0);
-        canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0)
-          ..imageFilter = ui.ImageFilter.blur(sigmaX: wpBlur, sigmaY: wpBlur * 0.25));
+        canvas.drawImageRect(
+            uiImage,
+            srcRect,
+            liveDst,
+            photoPaint(1.0)
+              ..imageFilter =
+                  ui.ImageFilter.blur(sigmaX: wpBlur, sigmaY: wpBlur * 0.25));
         break;
 
       case TransitionType.crossZoom:
@@ -532,24 +623,32 @@ class ExportService {
         final czScale = 1.8 - 0.8 * cz;
         final czBlur = (1.0 - cz) * (width * 0.01);
         _scaleAroundCenter(canvas, width, height, czScale);
-        canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(cz)
-          ..imageFilter = ui.ImageFilter.blur(sigmaX: czBlur, sigmaY: czBlur));
+        canvas.drawImageRect(
+            uiImage,
+            srcRect,
+            liveDst,
+            photoPaint(cz)
+              ..imageFilter = ui.ImageFilter.blur(sigmaX: czBlur, sigmaY: czBlur));
         break;
 
       case TransitionType.flash:
-        canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint((tp / 0.25).clamp(0.0, 1.0)));
+        canvas.drawImageRect(uiImage, srcRect, liveDst,
+            photoPaint((tp / 0.25).clamp(0.0, 1.0)));
         final fl = tp < 0.35 ? 1.0 - (tp / 0.35) : 0.0;
         if (fl > 0) {
-          canvas.drawRect(fullRect, Paint()..color = Colors.white.withOpacity(fl * 0.9));
+          canvas.drawRect(
+              fullRect, Paint()..color = Colors.white.withOpacity(fl * 0.9));
         }
         break;
 
       case TransitionType.circleReveal:
         final cr = _easeOut(tp);
-        final maxR = math.sqrt(width.toDouble() * width + height.toDouble() * height) / 2;
+        final maxR =
+            math.sqrt(width.toDouble() * width + height.toDouble() * height) / 2;
         canvas.save();
         canvas.clipPath(Path()
-          ..addOval(Rect.fromCircle(center: Offset(width / 2, height / 2), radius: maxR * cr)));
+          ..addOval(Rect.fromCircle(
+              center: Offset(width / 2, height / 2), radius: maxR * cr)));
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
         canvas.restore();
         break;
@@ -559,8 +658,12 @@ class ExportService {
         final sbBlur = (1.0 - sb) * (width * 0.012);
         _rotateAroundCenter(canvas, width, height, (1 - sb) * 0.6);
         _scaleAroundCenter(canvas, width, height, 0.75 + 0.25 * sb);
-        canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(sb)
-          ..imageFilter = ui.ImageFilter.blur(sigmaX: sbBlur, sigmaY: sbBlur));
+        canvas.drawImageRect(
+            uiImage,
+            srcRect,
+            liveDst,
+            photoPaint(sb)
+              ..imageFilter = ui.ImageFilter.blur(sigmaX: sbBlur, sigmaY: sbBlur));
         break;
 
       case TransitionType.rgbSplit:
@@ -569,43 +672,62 @@ class ExportService {
           final o = k * (width * 0.013);
           canvas.save();
           canvas.translate(o, -o * 0.3);
-          canvas.drawImageRect(uiImage, srcRect, liveDst, Paint()
-            ..colorFilter = const ColorFilter.mode(Color(0xFFFF0000), BlendMode.srcATop)
-            ..color = Colors.white.withOpacity(0.6));
+          canvas.drawImageRect(
+              uiImage,
+              srcRect,
+              liveDst,
+              Paint()
+                ..colorFilter = const ColorFilter.mode(
+                    Color(0xFFFF0000), BlendMode.srcATop)
+                ..color = Colors.white.withOpacity(0.6));
           canvas.restore();
           canvas.save();
           canvas.translate(-o, o * 0.3);
-          canvas.drawImageRect(uiImage, srcRect, liveDst, Paint()
-            ..colorFilter = const ColorFilter.mode(Color(0xFF00FF00), BlendMode.srcATop)
-            ..color = Colors.white.withOpacity(0.6));
+          canvas.drawImageRect(
+              uiImage,
+              srcRect,
+              liveDst,
+              Paint()
+                ..colorFilter = const ColorFilter.mode(
+                    Color(0xFF00FF00), BlendMode.srcATop)
+                ..color = Colors.white.withOpacity(0.6));
           canvas.restore();
           canvas.save();
           canvas.translate(o * 0.5, o * 0.5);
-          canvas.drawImageRect(uiImage, srcRect, liveDst, Paint()
-            ..colorFilter = const ColorFilter.mode(Color(0xFF0000FF), BlendMode.srcATop)
-            ..color = Colors.white.withOpacity(0.5));
+          canvas.drawImageRect(
+              uiImage,
+              srcRect,
+              liveDst,
+              Paint()
+                ..colorFilter = const ColorFilter.mode(
+                    Color(0xFF0000FF), BlendMode.srcATop)
+                ..color = Colors.white.withOpacity(0.5));
           canvas.restore();
           canvas.save();
           final bandTop = height * (0.35 + 0.1 * math.sin(tp * 40) - 0.06);
-          canvas.clipRect(Rect.fromLTWH(0, bandTop, width.toDouble(), height * 0.12));
+          canvas.clipRect(
+              Rect.fromLTWH(0, bandTop, width.toDouble(), height * 0.12));
           canvas.translate(-o * 1.5, 0);
           canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
           canvas.restore();
         }
-        canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint((tp / 0.6).clamp(0.0, 1.0)));
+        canvas.drawImageRect(uiImage, srcRect, liveDst,
+            photoPaint((tp / 0.6).clamp(0.0, 1.0)));
         break;
     }
 
     canvas.restore();
   }
 
-  static void _scaleAroundCenter(Canvas canvas, int width, int height, double scale) {
+  static void _scaleAroundCenter(
+      Canvas canvas, int width, int height, double scale) {
     canvas.translate(width / 2, height / 2);
     canvas.scale(scale, scale);
     canvas.translate(-width / 2, -height / 2);
   }
 
-  static void _rotateAroundCenter(Canvas canvas, int width, int height, double radians) {
+  static void _rotateAroundCenter(
+      Canvas canvas, int width, int height, double radians) {
     canvas.translate(width / 2, height / 2);
     canvas.rotate(radians);
     canvas.translate(-width / 2, -height / 2);
@@ -632,7 +754,8 @@ class ExportService {
         .fold<int>(0, (sum, photo) => sum + photo.durationMilliseconds);
 
     final currentTimeMs = currentSegmentStartMs +
-        (frameProgress * project.photos[currentSegmentIndex].durationMilliseconds).toInt();
+        (frameProgress * project.photos[currentSegmentIndex].durationMilliseconds)
+            .toInt();
 
     for (final text in project.texts) {
       if (currentTimeMs >= text.startTimeMilliseconds &&
@@ -662,7 +785,8 @@ class ExportService {
     final textStyle = TextStyle(
       color: Color(text.colorValue),
       fontSize: text.fontSize.toDouble(),
-      fontWeight: text.fontFamily == 'Unbounded' ? FontWeight.w800 : FontWeight.w600,
+      fontWeight:
+          text.fontFamily == 'Unbounded' ? FontWeight.w800 : FontWeight.w600,
       shadows: [
         Shadow(
           color: Colors.black.withOpacity(0.7),
@@ -687,16 +811,20 @@ class ExportService {
         textPainter.paint(canvas, Offset(x, y));
         break;
       case AnimationType.slideUp:
-        final offset = ui.lerpDouble(50.0, 0.0, progress.clamp(0.0, 0.2) / 0.2) ?? 0.0;
+        final offset =
+            ui.lerpDouble(50.0, 0.0, progress.clamp(0.0, 0.2) / 0.2) ?? 0.0;
         textPainter.paint(canvas, Offset(x, y + offset));
         break;
       case AnimationType.slideDown:
-        final offset = ui.lerpDouble(-50.0, 0.0, progress.clamp(0.0, 0.2) / 0.2) ?? 0.0;
+        final offset =
+            ui.lerpDouble(-50.0, 0.0, progress.clamp(0.0, 0.2) / 0.2) ?? 0.0;
         textPainter.paint(canvas, Offset(x, y + offset));
         break;
       case AnimationType.typewriter:
-        final charCount = (text.text.length * progress.clamp(0.0, 0.5) / 0.5).round();
-        final visibleText = text.text.substring(0, charCount.clamp(0, text.text.length));
+        final charCount =
+            (text.text.length * progress.clamp(0.0, 0.5) / 0.5).round();
+        final visibleText =
+            text.text.substring(0, charCount.clamp(0, text.text.length));
         final visiblePainter = TextPainter(
           text: TextSpan(text: visibleText, style: textStyle),
           textDirection: TextDirection.ltr,

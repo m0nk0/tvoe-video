@@ -188,7 +188,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                                 ),
                               ),
                               if (isSelected)
-                                Icon(Icons.check_circle,
+                                const Icon(Icons.check_circle,
                                     color: AppColors.primary, size: 24),
                             ],
                           ),
@@ -227,9 +227,6 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
     );
   }
 
-  // ==========================================
-  // ✅ Санитизация имени файла (убрать запрещённые символы)
-  // ==========================================
   String _sanitizeFileName(String name) {
     var clean = name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_');
     clean = clean.replaceAll(RegExp(r'\s+'), ' ').trim();
@@ -240,7 +237,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
 
   Future<void> _startExport() async {
     final fileName = _sanitizeFileName(_fileNameController.text);
-    
+
     setState(() {
       _isExporting = true;
       _progress = 0.0;
@@ -255,7 +252,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
       final result = await ExportService.exportVideo(
         project: widget.project,
         format: _selectedFormat,
-        outputFileName: fileName, // 🆕 передаём имя
+        outputFileName: fileName,
         onProgress: (progress) {
           if (mounted) {
             setState(() {
@@ -266,23 +263,34 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
         cancelChecker: () => !_isExporting,
       );
 
-      if (mounted) {
-        setState(() {
-          _isExporting = false;
-          if (result != null) {
-            _outputPath = result.videoPath;
-            _hasAudio = result.hasAudio;
-            _warningMessage = result.warning;
-            _saveClipToProject(result.videoPath, fileName);
-          } else {
-            _errorMessage = 'Экспорт отменён';
-          }
-        });
+      if (!mounted) return;
+
+      // ✅ Проверяем, что файл реально существует, прежде чем рапортовать успех
+      final fileOk = result != null &&
+          File(result.videoPath).existsSync() &&
+          File(result.videoPath).lengthSync() > 1024;
+
+      setState(() {
+        _isExporting = false;
+        if (fileOk) {
+          _outputPath = result.videoPath;
+          _hasAudio = result.hasAudio;
+          _warningMessage = result.warning;
+        } else {
+          _outputPath = null;
+          _errorMessage =
+              ExportService.lastError ?? 'Экспорт не завершён. Попробуйте снова.';
+        }
+      });
+
+      if (fileOk) {
+        _saveClipToProject(result.videoPath, fileName);
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _isExporting = false;
+          _outputPath = null;
           _errorMessage = 'Ошибка экспорта: $e';
         });
       }
@@ -290,12 +298,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   }
 
   Future<void> _saveClipToProject(String exportedPath, String fileName) async {
+    if (!File(exportedPath).existsSync()) return;
     try {
       final storage = ref.read(mediaStorageProvider);
-      final savedPath = await storage.saveClip(
-        exportedPath,
-        title: fileName,
-      );
+      final savedPath = await storage.saveClip(exportedPath, title: fileName);
       if (mounted) {
         setState(() {
           _savedClipPath = savedPath;
@@ -323,8 +329,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
 
     try {
       await Gal.putVideo(_outputPath!, album: 'Твоё Видео');
-      _showSnack('Видео сохранено в галерею (альбом «Твоё Видео»)',
-          Colors.green);
+      _showSnack(
+          'Видео сохранено в галерею (альбом «Твоё Видео»)', Colors.green);
     } catch (e) {
       print('❌ ОШИБКА ГАЛЕРЕИ: $e');
       try {
@@ -339,6 +345,10 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
 
   void _shareVideo() {
     if (_outputPath == null) return;
+    if (!File(_outputPath!).existsSync()) {
+      _showSnack('Файл не найден', Colors.red);
+      return;
+    }
     Share.shareXFiles(
       [XFile(_outputPath!)],
       text: 'Смотрите моё видео из "Твоё Видео"!',
@@ -363,11 +373,7 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (_isExporting) ...[
-                  const Icon(
-                    Icons.videocam,
-                    size: 64,
-                    color: AppColors.primary,
-                  ),
+                  const Icon(Icons.videocam, size: 64, color: AppColors.primary),
                   const SizedBox(height: 24),
                   Text(
                     'Экспорт: ${_selectedFormat.name} (${_selectedFormat.width}×${_selectedFormat.height})',
@@ -438,42 +444,41 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                     child: const Text('Отменить'),
                   ),
                 ] else if (_errorMessage != null) ...[
-                  const Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: Colors.red,
-                  ),
+                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
                   const SizedBox(height: 24),
                   Text(
                     _errorMessage!,
                     textAlign: TextAlign.center,
                     style: GoogleFonts.manrope(
-                      fontSize: 16,
+                      fontSize: 15,
                       color: AppColors.textPrimary,
+                      height: 1.4,
                     ),
                   ),
                   const SizedBox(height: 32),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _isExporting = true;
-                        _progress = 0.0;
-                        _errorMessage = null;
-                        _warningMessage = null;
-                        _outputPath = null;
-                        _savedClipPath = null;
-                        _hasAudio = false;
-                      });
-                      _startExport();
-                    },
-                    child: const Text('Попробовать снова'),
+                  ElevatedButton.icon(
+                    onPressed: _startExport,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Попробовать снова'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 14),
+                    ),
                   ),
-                ] else ...[
-                  const Icon(
-                    Icons.check_circle,
-                    size: 64,
-                    color: Colors.green,
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: _showFormatSelector,
+                    child: const Text('Изменить формат'),
                   ),
+                  const SizedBox(height: 4),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Назад в редактор'),
+                  ),
+                ] else if (_outputPath != null) ...[
+                  const Icon(Icons.check_circle, size: 64, color: Colors.green),
                   const SizedBox(height: 24),
                   Text(
                     'Видео готово!',
@@ -502,8 +507,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                       decoration: BoxDecoration(
                         color: Colors.orange.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: Colors.orange.withOpacity(0.3)),
+                        border:
+                            Border.all(color: Colors.orange.withOpacity(0.3)),
                       ),
                       child: Row(
                         children: [
@@ -532,8 +537,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                       decoration: BoxDecoration(
                         color: Colors.green.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: Colors.green.withOpacity(0.3)),
+                        border:
+                            Border.all(color: Colors.green.withOpacity(0.3)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -554,22 +559,96 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                     ),
                   ],
                   const SizedBox(height: 32),
-                  ElevatedButton.icon(
-                    onPressed: _saveToGallery,
-                    icon: const Icon(Icons.save),
-                    label: const Text('Сохранить в галерею'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _saveToGallery,
+                      icon: const Icon(Icons.save),
+                      label: const Text('Сохранить в галерею'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _shareVideo,
-                    icon: const Icon(Icons.share),
-                    label: const Text('Поделиться'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _shareVideo,
+                      icon: const Icon(Icons.share),
+                      label: const Text('Поделиться'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                    },
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Назад в редактор'),
+                  ),
+                ] else ...[
+                  // ✅ НОВОЕ: честное состояние «экспорт ещё не запускался»
+                  const Icon(Icons.movie_creation_outlined,
+                      size: 64, color: AppColors.textMuted),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Готовы к экспорту',
+                    style: GoogleFonts.unbounded(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Кадров: ${widget.project.photos.length} • '
+                    'Длительность: ${(widget.project.totalDurationMs / 1000).toStringAsFixed(1)} с',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.manrope(
+                      fontSize: 14,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.project.audioTrack != null
+                        ? '🎵 ${widget.project.audioTrack!.title}'
+                        : 'Без музыки',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.manrope(
+                      fontSize: 13,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _showFormatSelector,
+                      icon: const Icon(Icons.tune),
+                      label: const Text('Выбрать формат и начать'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
                     child: const Text('Назад в редактор'),
                   ),
                 ],
@@ -582,6 +661,14 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
   }
 
   Widget _buildExportResultInfo() {
+    String sizeText = '';
+    try {
+      if (_outputPath != null) {
+        final bytes = File(_outputPath!).lengthSync();
+        sizeText = ' • ${(bytes / 1024 / 1024).toStringAsFixed(1)} МБ';
+      }
+    } catch (_) {}
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -595,12 +682,16 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
             children: [
               const Icon(Icons.videocam, color: AppColors.primary, size: 18),
               const SizedBox(width: 8),
-              Text(
-                '${_selectedFormat.name} • ${_selectedFormat.width}×${_selectedFormat.height}',
-                style: GoogleFonts.manrope(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
+              Flexible(
+                child: Text(
+                  '${_selectedFormat.name} • ${_selectedFormat.width}×${_selectedFormat.height}$sizeText',
+                  style: GoogleFonts.manrope(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
@@ -622,9 +713,8 @@ class _ExportScreenState extends ConsumerState<ExportScreen> {
                       : 'Без музыки',
                   style: GoogleFonts.manrope(
                     fontSize: 13,
-                    color: _hasAudio
-                        ? AppColors.textPrimary
-                        : AppColors.textMuted,
+                    color:
+                        _hasAudio ? AppColors.textPrimary : AppColors.textMuted,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
