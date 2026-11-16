@@ -1,28 +1,15 @@
 import 'dart:io';
-import 'dart:math' as math;
-
-// ❌ ОТКЛЮЧЕНО: Эти плагины вызывают конфликт compileSdk 33 vs 36 в Gradle.
-// В будущем заменим на нативный анализ или серверную обработку.
-// import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';
 
 // ==========================================
-// Детектор битов музыки через FFmpeg (RMS-пики)
+// Детектор битов музыки через нативный MediaCodec (без FFmpeg)
 // ✅ Кэш + ✅ Waveform для визуализации
 // ==========================================
 
 class BeatAnalysis {
-  /// Времена ударов в секундах
   final List<double> beats;
-
-  /// Оценка темпа
   final double bpm;
-
-  /// ✅ НОВОЕ: нормализованный амплитудный профиль (0..1) для waveform
   final List<double> waveform;
-
-  /// ✅ НОВОЕ: общая длительность трека в секундах
   final double durationSec;
 
   const BeatAnalysis({
@@ -37,13 +24,9 @@ class BeatAnalysis {
 }
 
 class BeatDetector {
-  static const int _resetFrames = 2;
-  static const double _minInterval = 0.25;
-  static const double _sensitivity = 1.4;
+  static const MethodChannel _channel =
+      MethodChannel('com.tvoymagazine.tvoe_video/exporter');
 
-  // ==========================================
-  // КЭШ результатов анализа
-  // ==========================================
   static final Map<String, BeatAnalysis> _cache = {};
   static final Map<String, Future<BeatAnalysis>> _inFlight = {};
 
@@ -61,7 +44,8 @@ class BeatDetector {
 
     final cached = _cache[key];
     if (cached != null) {
-      print('⚡ BeatDetector: кэш для ${audioPath.split('/').last} (${cached.beats.length} битов, BPM ~${cached.bpm.round()})');
+      print('⚡ BeatDetector: кэш для ${audioPath.split('/').last} '
+          '(${cached.beats.length} битов, BPM ~${cached.bpm.round()})');
       return cached;
     }
 
@@ -81,7 +65,6 @@ class BeatDetector {
     return future;
   }
 
-  /// ✅ НОВОЕ: ручная корректировка битов (сохраняется в кэш)
   static Future<void> overrideBeats(String audioPath, List<double> newBeats) async {
     final key = await _cacheKey(audioPath);
     final cur = _cache[key];
@@ -102,124 +85,58 @@ class BeatDetector {
   }
 
   // ==========================================
-  // ❌ ЗАГЛУШКА: Реальный анализ трека отключен
+  // Нативный анализ через BeatAnalyzer.kt
   // ==========================================
   static Future<BeatAnalysis> _detectBeatsInternal(String audioPath) async {
-    print('⚠️ BeatDetector: FFmpeg отключен для стабилизации Release-сборки. Возвращаем пустой анализ.');
-    return const BeatAnalysis(beats: [], bpm: 0, waveform: [], durationSec: 0);
-
-    /* ОРИГИНАЛЬНЫЙ КОД (сохранен для будущего восстановления):
     try {
-      final dir = await getTemporaryDirectory();
-      final outFile = File(
-          '${dir.path}/rms_${DateTime.now().millisecondsSinceEpoch}.txt');
-
-      final cmd = '-i "$audioPath" -af '
-          '"astats=metadata=1:reset=$_resetFrames,'
-          'ametadata=print:key=lavfi.astats.Overall.RMS_level:file=${outFile.path}" '
-          '-f null -';
-
-      final session = await FFmpegKit.execute(cmd);
-      final rc = await session.getReturnCode();
-
-      if (!ReturnCode.isSuccess(rc) || !outFile.existsSync()) {
-        print('⚠️ BeatDetector: FFmpeg не смог анализировать трек');
+      final file = File(audioPath);
+      if (!file.existsSync()) {
+        print('⚠️ BeatDetector: файл не найден: $audioPath');
         return const BeatAnalysis(beats: [], bpm: 0);
       }
 
-      final content = await outFile.readAsString();
-      try {
-        outFile.deleteSync();
-      } catch (_) {}
+      final result = await _channel.invokeMethod('analyzeBeats', {
+        'audioPath': audioPath,
+      });
 
-      return _parseAndDetect(content);
+      if (result is! Map) {
+        print('⚠️ BeatDetector: неожиданный ответ от натива');
+        return const BeatAnalysis(beats: [], bpm: 0);
+      }
+
+      final beatsRaw = result['beats'];
+      final bpmRaw = result['bpm'];
+      final waveRaw = result['waveform'];
+      final durRaw = result['durationSec'];
+
+      final beats = <double>[];
+      if (beatsRaw is List) {
+        for (final v in beatsRaw) {
+          if (v is num) beats.add(v.toDouble());
+        }
+      }
+
+      final bpm = bpmRaw is num ? bpmRaw.toDouble() : 0.0;
+
+      final waveform = <double>[];
+      if (waveRaw is List) {
+        for (final v in waveRaw) {
+          if (v is num) waveform.add(v.toDouble());
+        }
+      }
+
+      final durationSec = durRaw is num ? durRaw.toDouble() : 0.0;
+
+      print('🎵 BeatDetector: ${beats.length} битов, BPM ~${bpm.round()}');
+      return BeatAnalysis(
+        beats: beats,
+        bpm: bpm,
+        waveform: waveform,
+        durationSec: durationSec,
+      );
     } catch (e) {
       print('⚠️ BeatDetector: $e');
       return const BeatAnalysis(beats: [], bpm: 0);
     }
-    */
-  }
-
-  // ==========================================
-  // Парсинг вывода FFmpeg + детекция пиков + waveform
-  // ==========================================
-  static BeatAnalysis _parseAndDetect(String content) {
-    final times = <double>[];
-    final energies = <double>[];
-    double? lastTime;
-
-    for (final raw in content.split('\n')) {
-      final line = raw.trim();
-      if (line.startsWith('frame:')) {
-        final m = RegExp(r'pts_time:([0-9.]+)').firstMatch(line);
-        if (m != null) lastTime = double.parse(m.group(1)!);
-      } else if (line.startsWith('lavfi.astats.Overall.RMS_level=')) {
-        final v = double.tryParse(line.split('=').last);
-        if (v != null && lastTime != null) {
-          times.add(lastTime);
-          energies.add(math.pow(10, v / 20).toDouble());
-        }
-      }
-    }
-
-    if (times.length < 8) {
-      return const BeatAnalysis(beats: [], bpm: 0);
-    }
-
-    // ---- Waveform: сжимаем энергии в 240 корзин по времени ----
-    final totalSec = times.last;
-    final buckets = (totalSec * 20).round().clamp(64, 4000); // 1 корзина на 50 мс
-    final waveform = List<double>.filled(buckets, 0);
-    final bucketSec = totalSec / buckets;
-    for (int i = 0; i < times.length; i++) {
-      final b = (times[i] / bucketSec).floor().clamp(0, buckets - 1);
-      if (energies[i] > waveform[b]) waveform[b] = energies[i];
-    }
-    final maxAmp = waveform.reduce(math.max);
-    if (maxAmp > 0) {
-      for (int i = 0; i < buckets; i++) {
-        waveform[i] = (waveform[i] / maxAmp).clamp(0.0, 1.0).toDouble();
-      }
-    }
-
-    // ---- Поиск пиков относительно локальной средней ----
-    final beats = <double>[];
-    const window = 20;
-    double lastBeat = -1;
-
-    for (int i = 2; i < times.length - 2; i++) {
-      final from = math.max(0, i - window);
-      final to = math.min(times.length, i + window);
-      double sum = 0;
-      for (int j = from; j < to; j++) {
-        sum += energies[j];
-      }
-      final avg = sum / (to - from);
-
-      final isPeak = energies[i] > avg * _sensitivity &&
-          energies[i] > energies[i - 1] &&
-          energies[i] >= energies[i + 1];
-
-      if (isPeak && (lastBeat < 0 || times[i] - lastBeat >= _minInterval)) {
-        beats.add(times[i]);
-        lastBeat = times[i];
-      }
-    }
-
-    if (beats.length < 4) {
-      return BeatAnalysis(beats: const [], bpm: 0, waveform: waveform, durationSec: totalSec);
-    }
-
-    // ---- BPM по медиане интервалов ----
-    final intervals = <double>[];
-    for (int i = 1; i < beats.length; i++) {
-      intervals.add(beats[i] - beats[i - 1]);
-    }
-    intervals.sort();
-    final median = intervals[intervals.length ~/ 2];
-    final bpm = median > 0 ? 60 / median : 0.0;
-
-    print('🎵 BeatDetector: ${beats.length} битов, BPM ~${bpm.round()}');
-    return BeatAnalysis(beats: beats, bpm: bpm, waveform: waveform, durationSec: totalSec);
   }
 }

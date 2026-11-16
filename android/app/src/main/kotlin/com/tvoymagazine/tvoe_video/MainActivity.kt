@@ -111,7 +111,6 @@ class MainActivity : FlutterActivity() {
                         }
                     }
 
-                    // ✅ ШАГ 2: добавление звука
                     "muxAudio" -> {
                         val videoPath = call.argument<String>("videoPath")
                         val audioPath = call.argument<String>("audioPath")
@@ -146,12 +145,34 @@ class MainActivity : FlutterActivity() {
                         }
                     }
 
+                    // ✅ ШАГ 3: анализ битов
+                    "analyzeBeats" -> {
+                        val audioPath = call.argument<String>("audioPath")
+                        if (audioPath.isNullOrEmpty()) {
+                            result.error("BAD_ARGS", "Нет audioPath", null)
+                            return@setMethodCallHandler
+                        }
+                        w.post {
+                            try {
+                                val r = BeatAnalyzer.analyze(audioPath)
+                                val map = HashMap<String, Any?>()
+                                map["beats"] = r.beats
+                                map["bpm"] = r.bpm
+                                map["waveform"] = r.waveform
+                                map["durationSec"] = r.durationSec
+                                map["isValid"] = r.isValid()
+                                ok(result, map)
+                            } catch (e: Throwable) {
+                                fail(result, e)
+                            }
+                        }
+                    }
+
                     else -> result.notImplemented()
                 }
             }
     }
 
-    /** Вызывать ТОЛЬКО на worker-потоке */
     private fun abortOnWorker() {
         try { encoder?.abort() } catch (_: Throwable) {}
         encoder = null

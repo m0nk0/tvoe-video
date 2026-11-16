@@ -41,23 +41,65 @@ bool isPlayerLoadedWith(AudioPlayer player, String path) {
 
 // ==========================================
 // ✅ ГЛАВНАЯ ТОЧКА ВХОДА: умный выбор музыки
-// - Если трек уже есть → сразу редактор (громкость/задержка)
-// - Если трека нет → sheet выбора источника, потом редактор
-// Вызывается из: радиального меню, карточки кадра, таймлайн-студии.
+// Трек есть → сразу редактор. Трека нет → лист источников.
 // ==========================================
 void showMusicSourcePicker(BuildContext context, WidgetRef ref) {
   final track = ref.read(currentProjectProvider).audioTrack;
   if (track != null) {
-    // Трек есть — сразу редактор
     showAudioManagerSheet(context, ref);
     return;
   }
-  // Трека нет — выбор источника
   _showMusicSourceSheet(context, ref);
 }
 
 // ==========================================
-// Лист выбора источника музыки (аналогично _showPhotoSourceSheet)
+// ✅ ПРИМЕНЕНИЕ ТРЕКА
+// openEditor = true → после применения открыть панель «Музыка»
+// ==========================================
+Future<void> _applyTrack(
+  BuildContext context,
+  WidgetRef ref,
+  AudioTrack track, {
+  required bool openEditor,
+}) async {
+  final player = ref.read(audioPlayerProvider);
+  try {
+    try {
+      await player.stop();
+    } catch (_) {}
+    ref.read(isAudioPlayingProvider.notifier).state = false;
+
+    final stored = await _storeTrack(ref, track);
+    ref.read(currentProjectProvider.notifier).setAudioTrack(stored);
+
+    if (context.mounted) {
+      HapticFeedback.mediumImpact();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Музыка «${stored.title}» добавлена в проект'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      if (openEditor) {
+        showAudioManagerSheet(context, ref);
+      }
+    }
+  } catch (e) {
+    print('❌ Ошибка применения трека: $e');
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('❌ Ошибка добавления музыки: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+}
+
+// ==========================================
+// Лист выбора источника музыки (когда трека ещё нет)
 // ==========================================
 void _showMusicSourceSheet(BuildContext context, WidgetRef ref) {
   showModalBottomSheet(
@@ -96,10 +138,7 @@ void _showMusicSourceSheet(BuildContext context, WidgetRef ref) {
               const SizedBox(height: 4),
               Text(
                 'Выберите, откуда взять трек',
-                style: GoogleFonts.manrope(
-                  fontSize: 12,
-                  color: AppColors.textMuted,
-                ),
+                style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
               ),
               const SizedBox(height: 20),
               _SourceTile(
@@ -109,7 +148,7 @@ void _showMusicSourceSheet(BuildContext context, WidgetRef ref) {
                 subtitle: 'Папки Music, Download и другие',
                 onTap: () {
                   Navigator.pop(sheetCtx);
-                  _showDeviceMusicSheetAndThenEdit(context, ref);
+                  _showDeviceMusicSheet(context, ref, openEditorAfter: true);
                 },
               ),
               const SizedBox(height: 12),
@@ -120,46 +159,33 @@ void _showMusicSourceSheet(BuildContext context, WidgetRef ref) {
                 subtitle: 'Загруженные ранее и встроенные треки',
                 onTap: () {
                   Navigator.pop(sheetCtx);
-                  _showMediaLibraryMusicSheetAndThenEdit(context, ref);
+                  _showMediaLibraryMusicSheet(context, ref, openEditorAfter: true);
                 },
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _SourceTile(
-                      icon: Icons.folder_open,
-                      iconColor: Colors.orange,
-                      title: 'Другая папка',
-                      subtitle: 'Выбрать файл вручную',
-                      onTap: () async {
-                        Navigator.pop(sheetCtx);
-                        final track = await pickAudioFromDevice();
-                        if (track != null && context.mounted) {
-                          _showAudioPreviewDialog(
-                            context,
-                            ref,
-                            track,
-                            openEditorAfter: true,
-                          );
-                        }
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _SourceTile(
-                      icon: Icons.cloud_download,
-                      iconColor: Colors.purple,
-                      title: 'Из интернета',
-                      subtitle: 'По URL',
-                      onTap: () {
-                        Navigator.pop(sheetCtx);
-                        _showUrlInputDialog(context, ref);
-                      },
-                    ),
-                  ),
-                ],
+              _SourceTile(
+                icon: Icons.folder_open,
+                iconColor: Colors.orange,
+                title: 'Другая папка',
+                subtitle: 'Выбрать файл вручную',
+                onTap: () async {
+                  Navigator.pop(sheetCtx);
+                  final track = await pickAudioFromDevice();
+                  if (track != null && context.mounted) {
+                    await _applyTrack(context, ref, track, openEditor: true);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              _SourceTile(
+                icon: Icons.cloud_download,
+                iconColor: Colors.purple,
+                title: 'Из интернета',
+                subtitle: 'Скачать по URL',
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _showUrlInputDialog(context, ref, openEditorAfter: true);
+                },
               ),
             ],
           ),
@@ -169,18 +195,11 @@ void _showMusicSourceSheet(BuildContext context, WidgetRef ref) {
   );
 }
 
-// Обёртка: после успешного применения трека открывает редактор
-void _showDeviceMusicSheetAndThenEdit(BuildContext context, WidgetRef ref) {
-  // Используем существующий _showDeviceMusicSheet, но с открытием редактора после
-  _showDeviceMusicSheetWithAutoEditor(context, ref);
-}
-
-void _showMediaLibraryMusicSheetAndThenEdit(BuildContext context, WidgetRef ref) {
-  _showMediaLibraryMusicSheetWithAutoEditor(context, ref);
-}
-
 // ==========================================
-// Панель управления музыкой (громкость, задержка, биты)
+// ✅ ПАНЕЛЬ «МУЗЫКА» (редактор)
+// Все внутренние списки открываются с openEditorAfter: true,
+// чтобы после тапа по треку ВЕРНУТЬСЯ сюда.
+// Внизу — кнопка «Применить».
 // ==========================================
 void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
   showModalBottomSheet(
@@ -231,7 +250,8 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   onPressed: () {
                     HapticFeedback.lightImpact();
                     Navigator.pop(sheetContext);
-                    _showDeviceMusicSheet(context, ref);
+                    // ✅ true: после выбора трека вернёмся в эту панель
+                    _showDeviceMusicSheet(context, ref, openEditorAfter: true);
                   },
                   icon: const Icon(Icons.library_music),
                   label: const Text('Музыка на устройстве'),
@@ -249,7 +269,9 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   onPressed: () {
                     HapticFeedback.lightImpact();
                     Navigator.pop(sheetContext);
-                    _showMediaLibraryMusicSheet(context, ref);
+                    // ✅ true: после выбора трека вернёмся в эту панель
+                    _showMediaLibraryMusicSheet(context, ref,
+                        openEditorAfter: true);
                   },
                   icon: const Icon(Icons.album_outlined),
                   label: const Text('Из медиатеки'),
@@ -269,7 +291,8 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                         Navigator.pop(sheetContext);
                         final track = await pickAudioFromDevice();
                         if (track != null && context.mounted) {
-                          _showAudioPreviewDialog(context, ref, track);
+                          await _applyTrack(context, ref, track,
+                              openEditor: true);
                         }
                       },
                       icon: const Icon(Icons.folder_open),
@@ -285,7 +308,8 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                     child: OutlinedButton.icon(
                       onPressed: () {
                         Navigator.pop(sheetContext);
-                        _showUrlInputDialog(context, ref);
+                        _showUrlInputDialog(context, ref,
+                            openEditorAfter: true);
                       },
                       icon: const Icon(Icons.cloud_download),
                       label: const Text('Из интернета'),
@@ -323,10 +347,8 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                     'Нужны фото на таймлайне и музыка в проекте',
-                    style: GoogleFonts.manrope(
-                      fontSize: 11,
-                      color: AppColors.textMuted,
-                    ),
+                    style:
+                        GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
                   ),
                 ),
               const SizedBox(height: 12),
@@ -347,6 +369,45 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
               ),
               const SizedBox(height: 16),
               const _CurrentTrackWidget(),
+
+              // ✅ НОВОЕ: кнопка «Применить» — закрыть панель, оставив настройки
+              const SizedBox(height: 16),
+              Consumer(
+                builder: (context, ref2, _) {
+                  final hasTrack =
+                      ref2.watch(currentProjectProvider).audioTrack != null;
+                  if (!hasTrack) return const SizedBox.shrink();
+                  return SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        HapticFeedback.mediumImpact();
+                        Navigator.pop(sheetContext);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('✅ Музыка применена'),
+                            backgroundColor: Colors.green,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.check, size: 22),
+                      label: Text(
+                        'Применить',
+                        style: GoogleFonts.manrope(
+                            fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         ),
@@ -361,9 +422,13 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
 }
 
 // ==========================================
-// Из медиатеки
+// Список треков медиатеки
 // ==========================================
-Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) async {
+Future<void> _showMediaLibraryMusicSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  required bool openEditorAfter,
+}) async {
   final storage = ref.read(mediaStorageProvider);
   final files = storage.listMusic();
 
@@ -376,7 +441,6 @@ Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) as
     ),
     builder: (sheetContext) {
       final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
-
       return SafeArea(
         top: false,
         minimum: EdgeInsets.only(bottom: systemBottomInset),
@@ -409,13 +473,9 @@ Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) as
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    files.isEmpty
-                        ? 'Медиатека пуста — загрузи треки кнопкой 🎵'
-                        : 'Треков: ${files.length}',
-                    style: GoogleFonts.manrope(
-                      fontSize: 12,
-                      color: AppColors.textMuted,
-                    ),
+                    files.isEmpty ? 'Медиатека пуста' : 'Треков: ${files.length}',
+                    style:
+                        GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -423,25 +483,17 @@ Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) as
             const Divider(height: 1),
             Expanded(
               child: files.isEmpty
-                  ? Center(
+                  ? const Center(
                       child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.music_off,
-                                size: 48, color: AppColors.textMuted),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Сначала загрузи музыку в медиатеку',
+                        padding: EdgeInsets.all(32),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.music_off,
+                              size: 48, color: AppColors.textMuted),
+                          SizedBox(height: 12),
+                          Text('Сначала загрузи треки',
                               textAlign: TextAlign.center,
-                              style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                color: AppColors.textMuted,
-                              ),
-                            ),
-                          ],
-                        ),
+                              style: TextStyle(color: AppColors.textMuted)),
+                        ]),
                       ),
                     )
                   : ListView.separated(
@@ -453,7 +505,6 @@ Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) as
                         final file = files[index];
                         final name = MediaStorageService.displayName(file);
                         final isBundled = BundledMusicService.isBundled(file);
-
                         return InkWell(
                           onTap: () {
                             Navigator.pop(sheetContext);
@@ -462,7 +513,8 @@ Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) as
                               title: name,
                               isFromInternet: false,
                             );
-                            _showAudioPreviewDialog(context, ref, track);
+                            _applyTrack(context, ref, track,
+                                openEditor: openEditorAfter);
                           },
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
@@ -529,13 +581,55 @@ Future<void> _showMediaLibraryMusicSheet(BuildContext context, WidgetRef ref) as
   );
 }
 
-// ✅ Вариант с авто-открытием редактора
-Future<void> _showMediaLibraryMusicSheetWithAutoEditor(
-    BuildContext context, WidgetRef ref) async {
-  final storage = ref.read(mediaStorageProvider);
-  final files = storage.listMusic();
+// ==========================================
+// Список треков с устройства
+// ==========================================
+Future<void> _showDeviceMusicSheet(
+  BuildContext context,
+  WidgetRef ref, {
+  required bool openEditorAfter,
+}) async {
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (loadingContext) => Center(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: AppColors.primary),
+            const SizedBox(height: 16),
+            Text('Поиск музыки…',
+                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+          ],
+        ),
+      ),
+    ),
+  );
 
-  await showModalBottomSheet(
+  final granted = await requestAudioPermission();
+  final tracks = granted ? await scanDeviceMusic() : <AudioTrack>[];
+
+  if (!context.mounted) return;
+  Navigator.pop(context);
+
+  if (!granted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Нет разрешения на чтение музыки'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 5),
+      ),
+    );
+    return;
+  }
+
+  showModalBottomSheet(
     context: context,
     backgroundColor: AppColors.surface,
     isScrollControlled: true,
@@ -566,28 +660,36 @@ Future<void> _showMediaLibraryMusicSheetWithAutoEditor(
                       ),
                     ),
                   ),
-                  Text('Из медиатеки',
-                      style: GoogleFonts.unbounded(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
+                  Text(
+                    'Музыка на устройстве',
+                    style: GoogleFonts.unbounded(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text(files.isEmpty ? 'Медиатека пуста' : 'Треков: ${files.length}',
-                      style: GoogleFonts.manrope(
-                          fontSize: 12, color: AppColors.textMuted)),
+                  Text(
+                    tracks.isEmpty
+                        ? 'Ничего не найдено'
+                        : 'Найдено треков: ${tracks.length}',
+                    style:
+                        GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                  ),
                 ],
               ),
             ),
             const Divider(height: 1),
             Expanded(
-              child: files.isEmpty
+              child: tracks.isEmpty
                   ? const Center(
                       child: Padding(
                         padding: EdgeInsets.all(32),
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
+                          Icon(Icons.music_off,
+                              size: 48, color: AppColors.textMuted),
                           SizedBox(height: 12),
-                          Text('Сначала загрузи треки',
+                          Text('Скопируйте музыку в папку Music или Download',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: AppColors.textMuted)),
                         ]),
@@ -595,71 +697,66 @@ Future<void> _showMediaLibraryMusicSheetWithAutoEditor(
                     )
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: files.length,
+                      itemCount: tracks.length,
                       separatorBuilder: (_, __) =>
                           const Divider(height: 1, indent: 68),
                       itemBuilder: (context, index) {
-                        final file = files[index];
-                        final name = MediaStorageService.displayName(file);
-                        final isBundled = BundledMusicService.isBundled(file);
+                        final track = tracks[index];
+                        final folder = _folderOf(track.filePath);
                         return InkWell(
                           onTap: () {
                             Navigator.pop(sheetContext);
-                            final track = AudioTrack(
-                              filePath: file.path,
-                              title: name,
-                              isFromInternet: false,
-                            );
-                            // ✅ Автоматически открываем редактор после применения
-                            _showAudioPreviewDialog(context, ref, track,
-                                openEditorAfter: true);
+                            _applyTrack(context, ref, track,
+                                openEditor: openEditorAfter);
                           },
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 12),
-                            child: Row(children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: AppColors.primary.withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(10),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(Icons.music_note,
+                                      color: AppColors.primary),
                                 ),
-                                child: Icon(
-                                  isBundled
-                                      ? Icons.auto_awesome
-                                      : Icons.music_note,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(name,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        track.title,
                                         style: GoogleFonts.manrope(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.textPrimary),
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary,
+                                        ),
                                         maxLines: 1,
-                                        overflow: TextOverflow.ellipsis),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      isBundled
-                                          ? '✨ Встроенный'
-                                          : MediaStorageService.formatBytes(file),
-                                      style: GoogleFonts.manrope(
-                                          fontSize: 11,
-                                          color: AppColors.textMuted),
-                                    ),
-                                  ],
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        folder,
+                                        style: GoogleFonts.manrope(
+                                            fontSize: 11,
+                                            color: AppColors.textMuted),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const Icon(Icons.chevron_right,
-                                  color: AppColors.textMuted),
-                            ]),
+                                const Icon(Icons.chevron_right,
+                                    color: AppColors.textMuted),
+                              ],
+                            ),
                           ),
                         );
                       },
@@ -687,8 +784,9 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12)),
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -751,201 +849,6 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   }
 }
 
-// ==========================================
-// С устройства
-// ==========================================
-Future<void> _showDeviceMusicSheet(BuildContext context, WidgetRef ref) async {
-  _showDeviceMusicSheetInternal(context, ref, openEditorAfter: false);
-}
-
-Future<void> _showDeviceMusicSheetWithAutoEditor(
-    BuildContext context, WidgetRef ref) async {
-  _showDeviceMusicSheetInternal(context, ref, openEditorAfter: true);
-}
-
-Future<void> _showDeviceMusicSheetInternal(BuildContext context, WidgetRef ref,
-    {required bool openEditorAfter}) async {
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (loadingContext) => Center(
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12)),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: AppColors.primary),
-            const SizedBox(height: 16),
-            Text('Поиск музыки…',
-                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  final granted = await requestAudioPermission();
-  final tracks = granted ? await scanDeviceMusic() : <AudioTrack>[];
-
-  if (!context.mounted) return;
-  Navigator.pop(context);
-
-  if (!granted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Нет разрешения на чтение музыки'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 5),
-      ),
-    );
-    return;
-  }
-
-  showModalBottomSheet(
-    context: context,
-    backgroundColor: AppColors.surface,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (sheetContext) {
-      final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
-
-      return SafeArea(
-        top: false,
-        minimum: EdgeInsets.only(bottom: systemBottomInset),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                          color: AppColors.surfaceLight,
-                          borderRadius: BorderRadius.circular(2)),
-                    ),
-                  ),
-                  Text('Музыка на устройстве',
-                      style: GoogleFonts.unbounded(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
-                  const SizedBox(height: 4),
-                  Text(
-                    tracks.isEmpty
-                        ? 'Ничего не найдено в папках Music и Download'
-                        : 'Найдено треков: ${tracks.length}',
-                    style: GoogleFonts.manrope(
-                        fontSize: 12, color: AppColors.textMuted),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: tracks.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.music_off,
-                                size: 48, color: AppColors.textMuted),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Скопируйте музыку в папку Music или Download',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.manrope(
-                                fontSize: 13,
-                                color: AppColors.textMuted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: tracks.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 68),
-                      itemBuilder: (context, index) {
-                        final track = tracks[index];
-                        final folder = _folderOf(track.filePath);
-
-                        return InkWell(
-                          onTap: () {
-                            Navigator.pop(sheetContext);
-                            _showAudioPreviewDialog(context, ref, track,
-                                openEditorAfter: openEditorAfter);
-                          },
-                          borderRadius: BorderRadius.circular(12),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 44,
-                                  height: 44,
-                                  decoration: BoxDecoration(
-                                    color:
-                                        AppColors.primary.withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(Icons.music_note,
-                                      color: AppColors.primary),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(track.title,
-                                          style: GoogleFonts.manrope(
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600,
-                                              color: AppColors.textPrimary),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis),
-                                      const SizedBox(height: 2),
-                                      Text(folder,
-                                          style: GoogleFonts.manrope(
-                                              fontSize: 11,
-                                              color: AppColors.textMuted),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis),
-                                    ],
-                                  ),
-                                ),
-                                const Icon(Icons.chevron_right,
-                                    color: AppColors.textMuted),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      );
-    },
-  );
-}
-
 String _folderOf(String path) {
   final parts = path.split('/');
   if (parts.length < 2) return path;
@@ -953,7 +856,7 @@ String _folderOf(String path) {
 }
 
 // ==========================================
-// Открытие системного файлового менеджера
+// Системный файловый менеджер
 // ==========================================
 Future<void> _openSystemFileManager(BuildContext context) async {
   final intent = AndroidIntent(
@@ -967,9 +870,12 @@ Future<void> _openSystemFileManager(BuildContext context) async {
     print('DocumentsUI не запустился: $e');
   }
   if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
         content: Text('Не удалось открыть проводник.'),
-        backgroundColor: Colors.orange));
+        backgroundColor: Colors.orange,
+      ),
+    );
   }
 }
 
@@ -977,206 +883,70 @@ Future<void> _openSystemFileManager(BuildContext context) async {
 // Копирование трека в папку проекта music/
 // ==========================================
 Future<AudioTrack> _storeTrack(WidgetRef ref, AudioTrack track) async {
-  try {
-    final storage = ref.read(mediaStorageProvider);
-    final musicDirPath = storage.musicDir.path;
+  final storage = ref.read(mediaStorageProvider);
+  final musicDirPath = storage.musicDir.path;
 
-    if (track.filePath.startsWith(musicDirPath)) return track;
+  if (track.filePath.startsWith(musicDirPath)) return track;
 
-    final storedPath =
-        await storage.importMusic(track.filePath, title: track.title);
+  final storedPath =
+      await storage.importMusic(track.filePath, title: track.title);
 
-    if (storedPath == null || storedPath.isEmpty) {
-      throw Exception('importMusic вернул пустой путь');
-    }
-
-    if (track.isFromInternet) {
-      try {
-        final original = File(track.filePath);
-        if (original.existsSync()) original.deleteSync();
-      } catch (_) {}
-    }
-
-    return track.copyWith(filePath: storedPath);
-  } catch (e) {
-    print('❌ Ошибка в _storeTrack: $e');
-    rethrow;
+  if (storedPath == null || storedPath.isEmpty) {
+    throw Exception('importMusic вернул пустой путь');
   }
+
+  if (track.isFromInternet) {
+    try {
+      final original = File(track.filePath);
+      if (original.existsSync()) original.deleteSync();
+    } catch (_) {}
+  }
+
+  return track.copyWith(filePath: storedPath);
 }
 
 // ==========================================
-// Превью трека перед добавлением
+// Ввод URL для скачивания
 // ==========================================
-Future<void> _showAudioPreviewDialog(BuildContext context, WidgetRef ref,
-    AudioTrack track,
-    {bool openEditorAfter = false}) async {
-  final player = ref.read(audioPlayerProvider);
-  final totalVideoMs = _totalVideoDurationMs(ref);
-  bool added = false;
-
-  try {
-    await player.setFilePath(track.filePath);
-  } catch (e) {
-    print('❌ Ошибка загрузки превью: $e');
-  }
-
-  await showDialog(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      backgroundColor: AppColors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Предпросмотр',
-          style: GoogleFonts.unbounded(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.music_note, size: 64, color: AppColors.primary),
-          const SizedBox(height: 16),
-          Text(track.title,
-              style: GoogleFonts.manrope(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          StreamBuilder<Duration>(
-            stream: player.positionStream,
-            builder: (context, posSnap) {
-              return StreamBuilder<Duration?>(
-                stream: player.durationStream,
-                builder: (context, durSnap) {
-                  return ProgressBar(
-                    progress: posSnap.data ?? Duration.zero,
-                    total: durSnap.data ?? Duration.zero,
-                    onSeek: (d) => player.seek(d),
-                    progressBarColor: AppColors.primary,
-                    baseBarColor: AppColors.surfaceLight,
-                    thumbColor: AppColors.primary,
-                  );
-                },
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceLight,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline,
-                    size: 18, color: AppColors.textMuted),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    totalVideoMs > 0
-                        ? 'Длительность видео: ${_fmtSec(totalVideoMs / 1000)}. Трек будет обрезан.'
-                        : 'В видео пока нет кадров.',
-                    style: GoogleFonts.manrope(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
-                        height: 1.3),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: Text('Отмена',
-              style: GoogleFonts.manrope(color: AppColors.textMuted)),
-        ),
-        ElevatedButton(
-          onPressed: () async {
-            try {
-              added = true;
-              await player.stop();
-              ref.read(isAudioPlayingProvider.notifier).state = false;
-              final stored = await _storeTrack(ref, track);
-              ref.read(currentProjectProvider.notifier).setAudioTrack(stored);
-              if (dialogContext.mounted) Navigator.pop(dialogContext);
-              if (context.mounted) {
-                HapticFeedback.mediumImpact();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content:
-                          Text('✅ Музыка «${stored.title}» добавлена в проект!'),
-                      backgroundColor: Colors.green),
-                );
-              }
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text('❌ Ошибка добавления: $e'),
-                      backgroundColor: Colors.red),
-                );
-              }
-            }
-          },
-          style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white),
-          child: Text('Добавить',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-        ),
-      ],
-    ),
-  );
-
-  await player.stop();
-  ref.read(isAudioPlayingProvider.notifier).state = false;
-
-  // ✅ АВТО-ОТКРЫТИЕ РЕДАКТОРА после применения трека
-  if (added && openEditorAfter && context.mounted) {
-    showAudioManagerSheet(context, ref);
-  }
-}
-
-// ==========================================
-// Ввод URL
-// ==========================================
-void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
+void _showUrlInputDialog(
+  BuildContext context,
+  WidgetRef ref, {
+  required bool openEditorAfter,
+}) {
   final controller = TextEditingController();
+
   showDialog(
     context: context,
     builder: (dialogContext) => AlertDialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Скачать из интернета',
-          style: GoogleFonts.unbounded(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary)),
+      title: Text(
+        'Скачать из интернета',
+        style: GoogleFonts.unbounded(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+          color: AppColors.textPrimary,
+        ),
+      ),
       content: TextField(
         controller: controller,
         style: const TextStyle(color: AppColors.textPrimary),
         decoration: InputDecoration(
           hintText: 'Вставьте URL аудиофайла…',
-          hintStyle:
-              TextStyle(color: AppColors.textMuted.withOpacity(0.6)),
+          hintStyle: TextStyle(color: AppColors.textMuted.withOpacity(0.6)),
           filled: true,
           fillColor: AppColors.surfaceLight,
           border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none),
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(dialogContext),
-          child: Text('Отмена',
-              style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          child:
+              Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
         ),
         ElevatedButton(
           onPressed: () async {
@@ -1191,13 +961,13 @@ void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
                 child: Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(12)),
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const CircularProgressIndicator(
-                          color: AppColors.primary),
+                      const CircularProgressIndicator(color: AppColors.primary),
                       const SizedBox(height: 16),
                       Text('Скачивание…',
                           style:
@@ -1213,22 +983,24 @@ void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
             if (context.mounted) {
               Navigator.pop(context);
               if (track != null) {
-                _showAudioPreviewDialog(context, ref, track,
-                    openEditorAfter: true);
+                await _applyTrack(context, ref, track,
+                    openEditor: openEditorAfter);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                      content: Text('Ошибка скачивания'),
-                      backgroundColor: Colors.red),
+                    content: Text('Ошибка скачивания'),
+                    backgroundColor: Colors.red,
+                  ),
                 );
               }
             }
           },
           style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white),
-          child: Text('Скачать',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+          ),
+          child:
+              Text('Скачать', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
         ),
       ],
     ),
@@ -1236,7 +1008,7 @@ void _showUrlInputDialog(BuildContext context, WidgetRef ref) {
 }
 
 // ==========================================
-// Текущий трек проекта на ГЛОБАЛЬНОМ плеере
+// Текущий трек проекта + регулировки
 // ==========================================
 class _CurrentTrackWidget extends ConsumerWidget {
   const _CurrentTrackWidget();
@@ -1252,8 +1024,10 @@ class _CurrentTrackWidget extends ConsumerWidget {
       return Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text('Музыка не добавлена',
-              style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          child: Text(
+            'Музыка не добавлена',
+            style: GoogleFonts.manrope(color: AppColors.textMuted),
+          ),
         ),
       );
     }
@@ -1277,13 +1051,16 @@ class _CurrentTrackWidget extends ConsumerWidget {
               const Icon(Icons.music_note, color: AppColors.primary, size: 28),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(track.title,
-                    style: GoogleFonts.manrope(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
+                child: Text(
+                  track.title,
+                  style: GoogleFonts.manrope(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               GestureDetector(
                 onTap: () async {
@@ -1295,6 +1072,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
                       try {
                         await player.setFilePath(track.filePath);
                       } catch (e) {
+                        print('❌ Ошибка загрузки трека: $e');
                         return;
                       }
                     }
@@ -1319,14 +1097,11 @@ class _CurrentTrackWidget extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               IconButton(
-                icon:
-                    const Icon(Icons.delete_outline, color: AppColors.error),
+                icon: const Icon(Icons.delete_outline, color: AppColors.error),
                 onPressed: () async {
                   await player.stop();
                   ref.read(isAudioPlayingProvider.notifier).state = false;
-                  ref
-                      .read(currentProjectProvider.notifier)
-                      .removeAudioTrack();
+                  ref.read(currentProjectProvider.notifier).removeAudioTrack();
                 },
               ),
             ],
@@ -1346,7 +1121,9 @@ class _CurrentTrackWidget extends ConsumerWidget {
                     baseBarColor: AppColors.surfaceLight,
                     thumbColor: AppColors.primary,
                     timeLabelTextStyle: GoogleFonts.jetBrainsMono(
-                        fontSize: 10, color: AppColors.textMuted),
+                      fontSize: 10,
+                      color: AppColors.textMuted,
+                    ),
                   );
                 },
               );
@@ -1355,8 +1132,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
           const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.volume_down,
-                  color: AppColors.textMuted, size: 20),
+              const Icon(Icons.volume_down, color: AppColors.textMuted, size: 20),
               Expanded(
                 child: Slider(
                   value: track.volume,
@@ -1372,15 +1148,14 @@ class _CurrentTrackWidget extends ConsumerWidget {
                   },
                 ),
               ),
-              const Icon(Icons.volume_up,
-                  color: AppColors.textMuted, size: 20),
+              const Icon(Icons.volume_up, color: AppColors.textMuted, size: 20),
               const SizedBox(width: 8),
               SizedBox(
                 width: 44,
                 child: Text(
                   '${(track.volume * 100).round()}%',
-                  style: GoogleFonts.jetBrainsMono(
-                      fontSize: 12, color: AppColors.primary),
+                  style:
+                      GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary),
                   textAlign: TextAlign.right,
                 ),
               ),
@@ -1389,29 +1164,36 @@ class _CurrentTrackWidget extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(children: [
-                const Icon(Icons.schedule,
-                    color: AppColors.textMuted, size: 18),
-                const SizedBox(width: 6),
-                Text('Задержка старта',
+              Row(
+                children: [
+                  const Icon(Icons.schedule, color: AppColors.textMuted, size: 18),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Задержка старта',
                     style: GoogleFonts.manrope(
-                        fontSize: 13,
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w500)),
-              ]),
-              Text('${_fmtSec(clampedStart)} / ${_fmtSec(maxStart)}',
-                  style: GoogleFonts.jetBrainsMono(
-                      fontSize: 12,
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600)),
+                      fontSize: 13,
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                '${_fmtSec(clampedStart)} / ${_fmtSec(maxStart)}',
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 12,
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
-                'Через сколько секунд видео начнёт играть трек',
-                style: GoogleFonts.manrope(
-                    fontSize: 11, color: AppColors.textMuted)),
+              'Через сколько секунд видео начнёт играть трек',
+              style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
+            ),
           ),
           Slider(
             value: clampedStart,
@@ -1433,10 +1215,13 @@ class _CurrentTrackWidget extends ConsumerWidget {
 }
 
 // ==========================================
-// Публичная обёртка: браузер музыки устройства
+// Публичная обёртка: браузер музыки устройства (для медиатеки)
 // ==========================================
-Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
-    {bool importOnly = false}) async {
+Future<void> showDeviceMusicBrowser(
+  BuildContext context,
+  WidgetRef ref, {
+  bool importOnly = false,
+}) async {
   showDialog(
     context: context,
     barrierDismissible: false,
@@ -1444,14 +1229,18 @@ Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12)),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const CircularProgressIndicator(color: AppColors.primary),
-          const SizedBox(height: 16),
-          Text('Поиск музыки…',
-              style: GoogleFonts.manrope(color: AppColors.textPrimary)),
-        ]),
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: AppColors.primary),
+            const SizedBox(height: 16),
+            Text('Поиск музыки…',
+                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
+          ],
+        ),
       ),
     ),
   );
@@ -1463,10 +1252,13 @@ Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
   Navigator.pop(context);
 
   if (!granted) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
         content: Text('Нет разрешения на чтение музыки'),
         backgroundColor: Colors.orange,
-        duration: Duration(seconds: 4)));
+        duration: Duration(seconds: 4),
+      ),
+    );
     return;
   }
 
@@ -1475,10 +1267,10 @@ Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
     backgroundColor: AppColors.surface,
     isScrollControlled: true,
     shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
     builder: (sheetContext) {
       final systemBottomInset = MediaQuery.of(sheetContext).padding.bottom;
-
       return SafeArea(
         top: false,
         minimum: EdgeInsets.only(bottom: systemBottomInset),
@@ -1492,25 +1284,31 @@ Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
                 children: [
                   Center(
                     child: Container(
-                        width: 40,
-                        height: 4,
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                            color: AppColors.surfaceLight,
-                            borderRadius: BorderRadius.circular(2))),
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                   ),
-                  Text('Музыка на устройстве',
-                      style: GoogleFonts.unbounded(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary)),
+                  Text(
+                    'Музыка на устройстве',
+                    style: GoogleFonts.unbounded(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   Text(
-                      tracks.isEmpty
-                          ? 'Ничего не найдено'
-                          : 'Найдено треков: ${tracks.length}',
-                      style: GoogleFonts.manrope(
-                          fontSize: 12, color: AppColors.textMuted)),
+                    tracks.isEmpty
+                        ? 'Ничего не найдено'
+                        : 'Найдено треков: ${tracks.length}',
+                    style:
+                        GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                  ),
                 ],
               ),
             ),
@@ -1520,18 +1318,14 @@ Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
                   ? const Center(
                       child: Padding(
                         padding: EdgeInsets.all(32),
-                        child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.music_off,
-                                  size: 48, color: AppColors.textMuted),
-                              SizedBox(height: 12),
-                              Text(
-                                  'Скопируйте музыку в папку Music или Download',
-                                  textAlign: TextAlign.center,
-                                  style:
-                                      TextStyle(color: AppColors.textMuted)),
-                            ]),
+                        child: Column(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.music_off,
+                              size: 48, color: AppColors.textMuted),
+                          SizedBox(height: 12),
+                          Text('Скопируйте музыку в папку Music или Download',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: AppColors.textMuted)),
+                        ]),
                       ),
                     )
                   : ListView.separated(
@@ -1542,50 +1336,83 @@ Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
                       itemBuilder: (context, index) {
                         final track = tracks[index];
                         final folder = _folderOf(track.filePath);
-
                         return InkWell(
                           onTap: () async {
                             Navigator.pop(sheetContext);
-                            await _pickTrack(context, ref, track, importOnly);
+                            if (importOnly) {
+                              try {
+                                final stored = await _storeTrack(ref, track);
+                                if (context.mounted) {
+                                  HapticFeedback.mediumImpact();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          '🎵 «${stored.title}» добавлен в медиатеку'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('❌ Ошибка импорта: $e'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                              }
+                            } else {
+                              await _applyTrack(context, ref, track,
+                                  openEditor: false);
+                            }
                           },
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 16, vertical: 12),
-                            child: Row(children: [
-                              Container(
+                            child: Row(
+                              children: [
+                                Container(
                                   width: 44,
                                   height: 44,
                                   decoration: BoxDecoration(
-                                      color:
-                                          AppColors.primary.withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(10)),
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
                                   child: const Icon(Icons.music_note,
-                                      color: AppColors.primary)),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(track.title,
+                                      color: AppColors.primary),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        track.title,
                                         style: GoogleFonts.manrope(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.textPrimary),
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary,
+                                        ),
                                         maxLines: 1,
-                                        overflow: TextOverflow.ellipsis),
-                                    const SizedBox(height: 2),
-                                    Text(folder,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        folder,
                                         style: GoogleFonts.manrope(
                                             fontSize: 11,
-                                            color: AppColors.textMuted)),
-                                  ],
+                                            color: AppColors.textMuted),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const Icon(Icons.chevron_right,
-                                  color: AppColors.textMuted),
-                            ]),
+                                const Icon(Icons.chevron_right,
+                                    color: AppColors.textMuted),
+                              ],
+                            ),
                           ),
                         );
                       },
@@ -1598,120 +1425,8 @@ Future<void> showDeviceMusicBrowser(BuildContext context, WidgetRef ref,
   );
 }
 
-Future<void> _pickTrack(BuildContext context, WidgetRef ref, AudioTrack track,
-    bool importOnly) async {
-  final player = ref.read(audioPlayerProvider);
-  try {
-    await player.setFilePath(track.filePath);
-  } catch (e) {
-    print('❌ Ошибка загрузки превью: $e');
-  }
-
-  bool added = false;
-
-  await showDialog(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      backgroundColor: AppColors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      title: Text('Предпросмотр',
-          style: GoogleFonts.unbounded(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.music_note, size: 64, color: AppColors.primary),
-          const SizedBox(height: 16),
-          Text(track.title,
-              style: GoogleFonts.manrope(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          StreamBuilder<Duration>(
-            stream: player.positionStream,
-            builder: (context, posSnap) {
-              return StreamBuilder<Duration?>(
-                stream: player.durationStream,
-                builder: (context, durSnap) {
-                  return ProgressBar(
-                    progress: posSnap.data ?? Duration.zero,
-                    total: durSnap.data ?? Duration.zero,
-                    onSeek: (d) => player.seek(d),
-                    progressBarColor: AppColors.primary,
-                    baseBarColor: AppColors.surfaceLight,
-                    thumbColor: AppColors.primary,
-                  );
-                },
-              );
-            },
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: Text('Отмена',
-              style: GoogleFonts.manrope(color: AppColors.textMuted)),
-        ),
-        ElevatedButton(
-          onPressed: () async {
-            added = true;
-            await player.stop();
-            ref.read(isAudioPlayingProvider.notifier).state = false;
-
-            try {
-              final stored = await _storeTrack(ref, track);
-              if (importOnly) {
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-                if (context.mounted) {
-                  HapticFeedback.mediumImpact();
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content:
-                          Text('🎵 «${stored.title}» добавлен в медиатеку'),
-                      backgroundColor: Colors.green));
-                }
-              } else {
-                ref.read(currentProjectProvider.notifier).setAudioTrack(stored);
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-                if (context.mounted) {
-                  HapticFeedback.mediumImpact();
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('✅ Музыка добавлена в проект!'),
-                      backgroundColor: Colors.green));
-                }
-              }
-            } catch (e) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('❌ Ошибка: $e'),
-                    backgroundColor: Colors.red));
-              }
-            }
-          },
-          style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white),
-          child: Text(importOnly ? 'В медиатеку' : 'Добавить',
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-        ),
-      ],
-    ),
-  );
-
-  await player.stop();
-  ref.read(isAudioPlayingProvider.notifier).state = false;
-
-  if (!importOnly && added && context.mounted) {
-    showAudioManagerSheet(context, ref);
-  }
-}
-
 // ==========================================
-// Вспомогательный виджет-плитка (для листинга источников)
+// Плитка источника
 // ==========================================
 class _SourceTile extends StatelessWidget {
   final IconData icon;
@@ -1755,15 +1470,23 @@ class _SourceTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: GoogleFonts.manrope(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
+                  Text(
+                    title,
+                    style: GoogleFonts.manrope(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   const SizedBox(height: 2),
-                  Text(subtitle,
-                      style: GoogleFonts.manrope(
-                          fontSize: 12, color: AppColors.textMuted)),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),
