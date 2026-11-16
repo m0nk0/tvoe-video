@@ -11,12 +11,8 @@ import '../../data/models/photo_layer.dart';
 import '../../data/models/text_layer.dart';
 import '../../data/providers/project_provider.dart';
 import '../../data/providers/projects_provider.dart';
+import 'audio_tools.dart'; // ✅ НОВОЕ: для showAudioManagerSheet
 
-// ==========================================
-// 🎬 Timeline Studio: полноэкранный мультитрек-таймлайн
-// ✅ Логарифмический зум (0.15–3.0), плавный
-// ✅ Дорожки по центру экрана
-// ==========================================
 class TimelineStudioScreen extends ConsumerStatefulWidget {
   const TimelineStudioScreen({super.key});
 
@@ -27,8 +23,7 @@ class TimelineStudioScreen extends ConsumerStatefulWidget {
 class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   final ScrollController _scroll = ScrollController();
 
-  // ✅ ЛОГАРИФМИЧЕСКИЙ ЗУМ: слайдер 0..1 → zoom 0.15..3.0
-  double _sliderValue = 0.4; // начальная позиция (~zoom 0.6)
+  double _sliderValue = 0.4;
   double _playheadMs = 0;
   List<double>? _editedBeats;
   BeatAnalysis? _analysis;
@@ -42,7 +37,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   static const double _minZoom = 0.15;
   static const double _maxZoom = 3.0;
 
-  /// Слайдер (0..1) → реальный зум (логарифмически)
   double get _zoom => _minZoom * math.pow(_maxZoom / _minZoom, _sliderValue);
   double get _pxPerMs => 0.1 * _zoom;
 
@@ -145,7 +139,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
 
     final contentWidth = _padLeft + totalMs * _pxPerMs + 160;
 
-    // ✅ Высота блока дорожек для центрирования
     const double tracksHeight = _videoH + _audioH + _textH + 2;
 
     return Scaffold(
@@ -179,18 +172,14 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
       ),
       body: Column(
         children: [
-          // ✅ ЦЕНТРИРОВАНИЕ: дорожки по вертикали в центре доступного пространства
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
                 : LayoutBuilder(
                     builder: (context, constraints) {
-                      // Сдвигаем блок дорожек вниз, чтобы он был по центру
-                      // (минус нижняя панель зума учтена через Expanded)
                       final topOffset = (constraints.maxHeight - tracksHeight) / 2;
                       return Stack(
   children: [
-    // ✅ ФОНОВАЯ ПАНЕЛЬ под дорожками
     Positioned(
       top: topOffset.clamp(0.0, constraints.maxHeight) - 12,
       left: 8,
@@ -204,7 +193,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
         ),
       ),
     ),
-    // Дорожки
     Positioned(
       top: topOffset.clamp(0.0, constraints.maxHeight),
       left: 0,
@@ -228,7 +216,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
         ),
       ),
     ),
-    // Плейхед
     Positioned(
       top: topOffset.clamp(0.0, constraints.maxHeight),
       left: 0,
@@ -243,7 +230,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
         ),
       ),
     ),
-    // Ручка плейхеда
     Positioned(
       top: topOffset.clamp(0.0, constraints.maxHeight) - 4,
       left: _padLeft + _playheadMs * _pxPerMs - (_scroll.hasClients ? _scroll.offset : 0) - 12,
@@ -259,7 +245,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
         },
       ),
     ),
-    // Подписи дорожек
     Positioned(
       top: topOffset.clamp(0.0, constraints.maxHeight),
       left: 0,
@@ -282,7 +267,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                     },
                   ),
           ),
-          // Нижняя панель: зум + время
           Container(
             color: AppColors.surface,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -290,7 +274,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
               children: [
                 const Icon(Icons.zoom_out, size: 18, color: AppColors.textMuted),
                 Expanded(
-                  // ✅ ЛОГАРИФМИЧЕСКИЙ СЛАЙДЕР: плавный на всём диапазоне
                   child: Slider(
                     value: _sliderValue,
                     min: 0.0,
@@ -356,57 +339,134 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
+  // ==========================================
+  // ✅ ПЕРЕПИСАНО: дорожка музыки всегда видима и кликабельна
+  // ==========================================
   Widget _buildAudioTrack(double totalVideo, double audioVisibleMs) {
     final track = ref.watch(currentProjectProvider).audioTrack;
-    if (track == null) {
-      return SizedBox(
-        height: _audioH,
-        child: Center(
-          child: Text('Музыка не добавлена', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
-        ),
-      );
-    }
-
     final wave = _visibleWave(audioVisibleMs);
-    final audioWidth = audioVisibleMs * _pxPerMs;
+    final trackWidth = totalVideo * _pxPerMs;
 
     return SizedBox(
       height: _audioH,
-      child: Stack(
-        children: [
-          if (wave.isNotEmpty)
+      child: GestureDetector(
+        // ✅ Тап открывает панель управления музыкой
+        onTap: () => showMusicSourcePicker(context, ref),
+        child: Stack(
+          children: [
+            // Блок дорожки (всегда рисуется)
             Positioned(
-              left: _padLeft + _audioOffsetMs * _pxPerMs,
-              width: audioWidth,
-              top: 0,
-              bottom: 0,
-              child: CustomPaint(painter: _WaveformPainter(wave: wave, color: AppColors.primary.withOpacity(0.55))),
-            ),
-          for (int i = 0; i < _beats.length; i++)
-            if (_beatMs(i) <= totalVideo)
-              Positioned(
-                left: _padLeft + _beatMs(i) * _pxPerMs - 12,
-                width: 24,
-                top: 0,
-                bottom: 0,
-                child: _BeatMarker(
-                  onDrag: (dx) {
-                    setState(() {
-                      _editedBeats = List<double>.from(_beats);
-                      final deltaSec = (dx / _pxPerMs) / 1000;
-                      final min = i > 0 ? _editedBeats![i - 1] + 0.05 : 0.0;
-                      final max = i < _editedBeats!.length - 1 ? _editedBeats![i + 1] - 0.05 : 9999.0;
-                      _editedBeats![i] = (_editedBeats![i] + deltaSec).clamp(min, max).toDouble();
-                    });
-                  },
-                  onEnd: () {
-                    if (_editedBeats != null) {
-                      BeatDetector.overrideBeats(track.filePath, _editedBeats!);
-                    }
-                  },
+              left: _padLeft,
+              width: trackWidth > 8 ? trackWidth : 8,
+              top: 6,
+              bottom: 6,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: track != null
+                      ? AppColors.primary.withValues(alpha: 0.12)
+                      : AppColors.surfaceLight.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: track != null
+                        ? AppColors.primary.withValues(alpha: 0.4)
+                        : AppColors.surfaceLight,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      Icon(
+                        track != null ? Icons.music_note : Icons.add,
+                        color: track != null ? AppColors.primary : AppColors.textMuted,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              track?.title ?? 'Добавить музыку',
+                              style: GoogleFonts.manrope(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: track != null
+                                    ? AppColors.textPrimary
+                                    : AppColors.textMuted,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (track != null && audioVisibleMs > 0)
+                              Text(
+                                '${(audioVisibleMs / 1000).toStringAsFixed(1)}с '
+                                '• Громкость ${(track.volume * 100).round()}%',
+                                style: GoogleFonts.manrope(
+                                  fontSize: 10,
+                                  color: AppColors.textMuted,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.textMuted,
+                        size: 18,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-        ],
+            ),
+            // ✅ Waveform поверх блока (если есть)
+            if (wave.isNotEmpty)
+              Positioned(
+                left: _padLeft + _audioOffsetMs * _pxPerMs,
+                width: audioVisibleMs * _pxPerMs,
+                top: 0,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: _WaveformPainter(
+                      wave: wave,
+                      color: AppColors.primary.withValues(alpha: 0.45),
+                    ),
+                  ),
+                ),
+              ),
+            // Маркеры битов (если есть)
+            for (int i = 0; i < _beats.length; i++)
+              if (_beatMs(i) <= totalVideo)
+                Positioned(
+                  left: _padLeft + _beatMs(i) * _pxPerMs - 12,
+                  width: 24,
+                  top: 0,
+                  bottom: 0,
+                  child: _BeatMarker(
+                    onDrag: (dx) {
+                      setState(() {
+                        _editedBeats = List<double>.from(_beats);
+                        final deltaSec = (dx / _pxPerMs) / 1000;
+                        final min = i > 0 ? _editedBeats![i - 1] + 0.05 : 0.0;
+                        final max = i < _editedBeats!.length - 1
+                            ? _editedBeats![i + 1] - 0.05
+                            : 9999.0;
+                        _editedBeats![i] =
+                            (_editedBeats![i] + deltaSec).clamp(min, max).toDouble();
+                      });
+                    },
+                    onEnd: () {
+                      if (_editedBeats != null) {
+                        BeatDetector.overrideBeats(track!.filePath, _editedBeats!);
+                      }
+                    },
+                  ),
+                ),
+          ],
+        ),
       ),
     );
   }

@@ -6,17 +6,15 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../../core/theme/colors.dart';
 import '../../../data/models/photo_layer.dart';
-import '../../../data/models/video_project.dart'; // ✅ ДОБАВЛЕНО: для OverlayType
+import '../../../data/models/video_project.dart';
 import '../../../data/providers/project_provider.dart';
 import '../../../data/providers/selection_provider.dart';
+import '../audio_tools.dart'; // ✅ НОВОЕ: для showAudioManagerSheet
 import '../crop/crop_editor_screen.dart';
 import 'effects_sheet.dart';
 import 'live_motion_sheet.dart';
 import 'transitions_sheet.dart';
 
-// ==========================================
-// Настройки кадра: информативная шторка
-// ==========================================
 void showPhotoSettingsSheet(BuildContext context, WidgetRef ref, int index) {
   showModalBottomSheet(
     context: context,
@@ -110,12 +108,10 @@ void showPhotoSettingsSheet(BuildContext context, WidgetRef ref, int index) {
                   ),
                   const SizedBox(height: 8),
 
-                                    // ✅ НОВОЕ: Карточка Оверлея кадра
                   _InfoTile(
                     icon: Icons.layers_outlined, iconColor: Colors.indigo, label: 'Оверлей кадра',
                     value: photo.overlayType == OverlayType.none ? 'Нет (как у проекта)' : '${_overlayLabel(photo.overlayType)} (${(photo.overlayIntensity * 100).round()}%)',
                     onTap: () {
-                      // ✅ ИСПРАВЛЕНО: Оборачиваем setSheetState в VoidCallback
                       showFrameOverlayPicker(context, ref, targets, () => setSheetState(() {}));
                     },
                   ),
@@ -129,6 +125,20 @@ void showPhotoSettingsSheet(BuildContext context, WidgetRef ref, int index) {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => CropEditorScreen(photoIndex: index)));
                     },
                   ),
+                  const SizedBox(height: 8),
+
+                  // ✅ НОВОЕ: Строка «Музыка клипа» — тап открывает панель управления
+                  _InfoTile(
+  icon: Icons.music_note,
+  iconColor: Colors.green,
+  label: 'Музыка клипа',
+  value: current.audioTrack?.title ?? 'Не добавлена',
+  onTap: () {
+    Navigator.pop(sheetContext);
+    // ✅ Умный выбор: если трек есть — сразу редактор, если нет — выбор источника
+    showMusicSourcePicker(context, ref);
+  },
+),
 
                   const SizedBox(height: 20),
                   const Divider(color: AppColors.surfaceLight),
@@ -236,9 +246,6 @@ void showPhotoSettingsSheet(BuildContext context, WidgetRef ref, int index) {
   );
 }
 
-// ==========================================
-// ✅ НОВОЕ: Пикер оверлея для кадра (с поддержкой мультивыбора)
-// ==========================================
 void showFrameOverlayPicker(BuildContext context, WidgetRef ref, List<int> targets, VoidCallback onUpdated) {
   final currentProject = ref.read(currentProjectProvider);
   final firstPhoto = currentProject.photos[targets.first];
@@ -332,8 +339,8 @@ void showFrameOverlayPicker(BuildContext context, WidgetRef ref, List<int> targe
                         for (final i in targets) {
                           notifier.updatePhotoOverlay(i, selectedType, selectedIntensity);
                         }
-                        Navigator.pop(pickerContext); // Закрываем пикер
-                        onUpdated(); // Обновляем родительскую шторку настроек
+                        Navigator.pop(pickerContext);
+                        onUpdated();
                       },
                       style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                       child: Text('Применить', style: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
@@ -349,9 +356,6 @@ void showFrameOverlayPicker(BuildContext context, WidgetRef ref, List<int> targe
   );
 }
 
-// ==========================================
-// Вспомогательные функции
-// ==========================================
 String _overlayLabel(OverlayType type) {
   switch (type) {
     case OverlayType.none: return 'Нет';

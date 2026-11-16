@@ -111,6 +111,41 @@ class MainActivity : FlutterActivity() {
                         }
                     }
 
+                    // ✅ ШАГ 2: добавление звука
+                    "muxAudio" -> {
+                        val videoPath = call.argument<String>("videoPath")
+                        val audioPath = call.argument<String>("audioPath")
+                        val outputPath = call.argument<String>("outputPath")
+                        val volume = (call.argument<Number>("volume"))?.toDouble() ?: 1.0
+                        val startSec = (call.argument<Number>("startTime"))?.toDouble() ?: 0.0
+                        val durationMs = call.argument<Int>("durationMs") ?: 0
+
+                        if (videoPath.isNullOrEmpty() ||
+                            audioPath.isNullOrEmpty() ||
+                            outputPath.isNullOrEmpty() ||
+                            durationMs <= 0
+                        ) {
+                            result.error("BAD_ARGS", "Неверные параметры muxAudio", null)
+                            return@setMethodCallHandler
+                        }
+
+                        w.post {
+                            try {
+                                val path = AudioMuxer.mux(
+                                    videoPath = videoPath,
+                                    audioPath = audioPath,
+                                    outputPath = outputPath,
+                                    volume = volume,
+                                    startSec = startSec,
+                                    durationMs = durationMs
+                                )
+                                ok(result, path)
+                            } catch (e: Throwable) {
+                                fail(result, e)
+                            }
+                        }
+                    }
+
                     else -> result.notImplemented()
                 }
             }

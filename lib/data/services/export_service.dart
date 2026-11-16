@@ -31,11 +31,12 @@ class ExportResult {
 }
 
 /// Сервис экспорта проекта в MP4 видео.
-/// Видео кодируется нативным Android MediaCodec (без сторонних плагинов).
+/// Видео кодируется нативным Android MediaCodec, звук — MediaExtractor + AAC + MediaMuxer.
+/// Никаких сторонних плагинов для рендера.
 class ExportService {
   static const int _defaultFps = 30;
 
-  /// Канал нативного энкодера (см. MainActivity.kt / VideoEncoder.kt)
+  /// Канал нативного экспортёра (см. MainActivity.kt / VideoEncoder.kt / AudioMuxer.kt)
   static const MethodChannel _channel =
       MethodChannel('com.tvoymagazine.tvoe_video/exporter');
 
@@ -172,7 +173,7 @@ class ExportService {
           return ExportResult(videoPath: finalVideoPath, hasAudio: true);
         }
 
-        // ✅ Фикс: немой файл больше не удаляется до переименования
+        // ✅ Немой файл НЕ удалён — используем его как fallback
         if (!_moveFile(silentVideoPath, finalVideoPath)) {
           lastError = 'Не удалось подготовить файл видео';
           _cleanup([silentVideoPath, finalVideoPath]);
@@ -181,7 +182,7 @@ class ExportService {
         return ExportResult(
           videoPath: finalVideoPath,
           hasAudio: false,
-          warning: 'Музыка появится на следующем этапе. Видео сохранено без звука.',
+          warning: 'Не удалось добавить музыку. Видео сохранено без звука.',
         );
       } else {
         onProgress?.call(1.0);
@@ -203,7 +204,8 @@ class ExportService {
   }
 
   // ==========================================
-  // ✅ НАТИВНЫЙ РЕНДЕР: Flutter Canvas → MediaCodec H.264
+  // ✅ ШАГ 1: нативный рендер видео
+  // Flutter Canvas → RGBA → MediaCodec H.264
   // ==========================================
   static Future<String?> _renderSilentVideo({
     required VideoProject project,
@@ -298,8 +300,8 @@ class ExportService {
   }
 
   // ==========================================
-  // ⏳ ШАГ 2: микширование звука (MediaExtractor → PCM → AAC → MediaMuxer)
-  // Пока не реализовано — видео сохраняется без звука.
+  // ✅ ШАГ 2: нативное микширование звука
+  // MP3 → PCM (громкость/задержка/фейд/обрезка) → AAC → MediaMuxer
   // ==========================================
   static Future<bool> _mixWithAudio({
     required String videoPath,
@@ -309,8 +311,38 @@ class ExportService {
     required double startTime,
     required int totalDurationMs,
   }) async {
-    print('⏳ _mixWithAudio: нативный муксер звука будет добавлен на Шаге 2.');
-    return false;
+    try {
+      final audioFile = File(audioPath);
+      if (!audioFile.existsSync()) {
+        print('⚠️ Аудиофайл не найден: $audioPath');
+        return false;
+      }
+      if (totalDurationMs <= 0) return false;
+
+      await _channel.invokeMethod('muxAudio', {
+        'videoPath': videoPath,
+        'audioPath': audioPath,
+        'outputPath': outputPath,
+        'volume': volume.clamp(0.0, 1.0),
+        'startTime': startTime.clamp(0.0, totalDurationMs / 1000.0),
+        'durationMs': totalDurationMs,
+      });
+
+      final out = File(outputPath);
+      if (!out.existsSync() || out.lengthSync() < 1024) {
+        print('⚠️ Муксер не создал файл со звуком');
+        _cleanup([outputPath]);
+        return false;
+      }
+
+      print('✅ Звук добавлен: '
+          '${(out.lengthSync() / 1024 / 1024).toStringAsFixed(2)} МБ');
+      return true;
+    } catch (e) {
+      print('❌ Ошибка микширования звука: $e');
+      _cleanup([outputPath]);
+      return false;
+    }
   }
 
   static Future<Uint8List?> _renderFrame({
@@ -352,7 +384,8 @@ class ExportService {
           .take(currentSegmentIndex)
           .fold<int>(0, (sum, photo) => sum + photo.durationMilliseconds);
       final elapsedMs = segmentStartMs +
-          (frameProgress * project.photos[currentSegmentIndex].durationMilliseconds)
+          (frameProgress *
+                  project.photos[currentSegmentIndex].durationMilliseconds)
               .toInt();
 
       paintOverlay(
@@ -754,7 +787,8 @@ class ExportService {
         .fold<int>(0, (sum, photo) => sum + photo.durationMilliseconds);
 
     final currentTimeMs = currentSegmentStartMs +
-        (frameProgress * project.photos[currentSegmentIndex].durationMilliseconds)
+        (frameProgress *
+                project.photos[currentSegmentIndex].durationMilliseconds)
             .toInt();
 
     for (final text in project.texts) {

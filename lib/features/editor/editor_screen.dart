@@ -172,7 +172,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
       print('❌ ОШИБКА СОХРАНЕНИЯ: $e\n$st');
       if (showSnackBar && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка сохранения: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 2)),
+          SnackBar(content: Text('Ошибка сохранения: $e'), backgroundColor: Colors.red, duration: Duration(seconds: 2)),
         );
       }
     }
@@ -618,7 +618,6 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
             ],
           ),
           actions: [
-            // ✅ Кнопка входа в Timeline Studio (текстовая, понятная)
             TextButton.icon(
               onPressed: () {
                 _pauseAudio();
@@ -754,7 +753,10 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with WidgetsBinding
                   items: [
                     RadialMenuItem(icon: Icons.image_outlined, label: 'Фото', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _showPhotoSourceSheet),
                     RadialMenuItem(icon: Icons.crop, label: 'Обрезать', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openCropEditor),
-                    RadialMenuItem(icon: Icons.music_note, label: 'Музыка', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openMediaLibrary),
+                    // ✅ ИСПРАВЛЕНО: нота = ЗАГРУЗКА музыки (умный выбор источника),
+                    // а не прямой переход в медиатеку.
+                    // Нет трека → лист источников; есть трек → сразу панель регулировок.
+                    RadialMenuItem(icon: Icons.music_note, label: 'Музыка', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: () => showMusicSourcePicker(context, ref)),
                     RadialMenuItem(icon: Icons.auto_fix_high, label: 'Эффекты', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openEffects),
                     RadialMenuItem(icon: Icons.text_fields, label: 'Текст', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: () => showTextManagerSheet(context, ref)),
                     RadialMenuItem(icon: Icons.change_circle_outlined, label: 'Переходы', color: AppColors.textPrimary, bgColor: AppColors.surfaceLight, onTap: _openTransitions),
