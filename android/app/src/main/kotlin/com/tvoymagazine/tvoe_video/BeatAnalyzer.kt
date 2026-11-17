@@ -7,24 +7,28 @@ import android.media.MediaFormat
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.abs
-import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * Анализ битов в аудиофайле.
- * Возвращает: beats (секунды), bpm, waveform (нормализованный 0..1), durationSec.
+ * Анализ битов в аудиофайле (нативный, без FFmpeg).
+ * MediaExtractor -> PCM 16 bit -> RMS по окнам 50 мс -> сглаживание ->
+ * адаптивный поиск пиков (3 прохода) + BPM по медиане + waveform.
+ *
+ * Все методы вызывать из worker-потока.
  */
 object BeatAnalyzer {
 
-    private const val RMS_WINDOW_MS = 50L      // окно RMS: 50 мс
-    private const val MIN_BEAT_INTERVAL = 0.25 // минимальный интервал между битами (сек)
-    private const val SENSITIVITY = 1.4        // порог пика над локальной средней
-    private const val PEAK_WINDOW = 20         // окно локальной средней (в обе стороны)
-    private const val MIN_BEATS = 4            // минимум битов для валидного BPM
+    private const val RMS_WINDOW_MS = 50L       // окно RMS: 50 мс
+    private const val MIN_BEAT_INTERVAL = 0.30  // мин. интервал между битами (сек)
+    private const val PEAK_WINDOW = 20          // окно локальной средней (в обе стороны)
+    private const val MIN_BEATS = 4             // минимум битов для валидного BPM
     private const val BPM_LOW = 40.0
     private const val BPM_HIGH = 220.0
     private const val WAVEFORM_POINTS_PER_SEC = 20.0
+    private const val MAX_BEATS = 300           // защита от частокола маркеров
+
+    // ✅ Пороги адаптивных проходов: строгий -> средний -> мягкий
+    private val SENSITIVITY_PASSES = doubleArrayOf(1.5, 1.3, 1.12)
 
     data class Result(
         val beats: List<Double>,
@@ -73,7 +77,10 @@ object BeatAnalyzer {
 
             var configured = false
             try {
-                srcFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+                srcFormat.setInteger(
+                    MediaFormat.KEY_PCM_ENCODING,
+                    AudioFormat.ENCODING_PCM_16BIT
+                )
                 dec.configure(srcFormat, null, null, 0)
                 configured = true
             } catch (_: Throwable) {
@@ -89,31 +96,39 @@ object BeatAnalyzer {
             var channels = 0
             var initialized = false
 
+            // ✅ Окно в семплах; пересчитывается ВНУТРИ ensureInit
+            var samplesPerWindow = 0
+
             fun ensureInit(): Boolean {
                 if (initialized) return true
                 val f = outFormat ?: srcFormat ?: return false
                 if (!f.containsKey(MediaFormat.KEY_SAMPLE_RATE) ||
                     !f.containsKey(MediaFormat.KEY_CHANNEL_COUNT)
                 ) return false
+
                 sampleRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                 if (sampleRate <= 0 || channels <= 0) {
-                    throw RuntimeException("Некорректный формат: rate=$sampleRate ch=$channels")
+                    throw RuntimeException(
+                        "Некорректный формат аудио: rate=$sampleRate ch=$channels"
+                    )
                 }
+                samplesPerWindow =
+                    (sampleRate.toDouble() * RMS_WINDOW_MS / 1000.0).toInt()
+                        .coerceAtLeast(1)
                 initialized = true
                 return true
             }
 
-            // Собираем RMS по окнам RMS_WINDOW_MS миллисекунд
+            // ==========================================
+            // Накопители RMS
+            // ==========================================
             val rmsValues = mutableListOf<Double>()
-            val rmsTimesMs = mutableListOf<Long>() // время в ms от начала
+            val rmsTimesMs = mutableListOf<Long>()
 
-            val samplesPerWindow = (sampleRate.toDouble() * RMS_WINDOW_MS / 1000.0).toInt()
-                .coerceAtLeast(1)
             var windowSamples = 0L
             var windowSumSq = 0.0
             var currentWindowMs = 0L
-            var totalSamplesProcessed = 0L
 
             fun flushWindow() {
                 if (windowSamples > 0) {
@@ -127,6 +142,7 @@ object BeatAnalyzer {
             }
 
             fun processPcm(bytes: ByteArray) {
+                if (!initialized) return
                 val stride = channels * 2
                 val frames = bytes.size / stride
                 val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
@@ -140,7 +156,6 @@ object BeatAnalyzer {
                     val mono = sum / channels
                     windowSumSq += mono
                     windowSamples++
-                    totalSamplesProcessed++
 
                     if (windowSamples >= samplesPerWindow) {
                         flushWindow()
@@ -156,7 +171,9 @@ object BeatAnalyzer {
             var guard = 0
 
             while (!outputDone) {
-                if (++guard > 5_000_000) throw RuntimeException("Зацикливание анализатора")
+                if (++guard > 5_000_000) {
+                    throw RuntimeException("Зацикливание анализатора битов")
+                }
 
                 if (!inputDone) {
                     val inIdx = dec.dequeueInputBuffer(10_000L)
@@ -165,7 +182,10 @@ object BeatAnalyzer {
                         buf.clear()
                         val size = extractor.readSampleData(buf, 0)
                         if (size < 0) {
-                            dec.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            dec.queueInputBuffer(
+                                inIdx, 0, 0, 0L,
+                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
                             inputDone = true
                         } else {
                             dec.queueInputBuffer(inIdx, 0, size, extractor.sampleTime, 0)
@@ -177,6 +197,14 @@ object BeatAnalyzer {
                 val outIdx = dec.dequeueOutputBuffer(info, 10_000L)
                 if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     outFormat = dec.outputFormat
+                    val enc = if (outFormat!!.containsKey(MediaFormat.KEY_PCM_ENCODING))
+                        outFormat!!.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                    else AudioFormat.ENCODING_PCM_16BIT
+                    if (enc != AudioFormat.ENCODING_PCM_16BIT) {
+                        throw RuntimeException(
+                            "Декодер выдал не 16-битный PCM (encoding=$enc)"
+                        )
+                    }
                     ensureInit()
                 } else if (outIdx >= 0) {
                     if (info.size > 0 && ensureInit()) {
@@ -194,14 +222,29 @@ object BeatAnalyzer {
                 }
             }
 
-            // Добить последнее неполное окно
             if (windowSamples > 0) flushWindow()
 
             if (rmsValues.size < 8) {
                 return Result(emptyList(), 0.0, emptyList(), durationSec)
             }
 
-            // === Waveform: сжимаем в ~WAVEFORM_POINTS_PER_SEC точек на секунду ===
+            // ==========================================
+            // Сглаживание RMS (окно 3)
+            // ==========================================
+            if (rmsValues.size >= 3) {
+                val smoothed = DoubleArray(rmsValues.size)
+                for (i in rmsValues.indices) {
+                    val a = rmsValues[maxOf(0, i - 1)]
+                    val b = rmsValues[i]
+                    val c = rmsValues[minOf(rmsValues.size - 1, i + 1)]
+                    smoothed[i] = (a + b + c) / 3.0
+                }
+                for (i in rmsValues.indices) rmsValues[i] = smoothed[i]
+            }
+
+            // ==========================================
+            // Waveform: ~20 точек/сек, нормализация 0..1
+            // ==========================================
             val totalMs = rmsTimesMs.last().toDouble()
             val waveform = if (totalMs <= 0) {
                 emptyList()
@@ -225,41 +268,71 @@ object BeatAnalyzer {
                 w
             }
 
-            // === Поиск пиков ===
-            val beats = mutableListOf<Double>()
-            var lastBeat = -1.0
-            for (i in PEAK_WINDOW until rmsValues.size - PEAK_WINDOW) {
-                val from = (i - PEAK_WINDOW).coerceAtLeast(0)
-                val to = (i + PEAK_WINDOW).coerceAtMost(rmsValues.size - 1)
-                var sum = 0.0
-                for (j in from..to) sum += rmsValues[j]
-                val avg = sum / (to - from + 1)
+            // ==========================================
+            // ✅ АДАПТИВНЫЙ ПОИСК ПИКОВ: 3 прохода
+            // ==========================================
+            val maxRms = rmsValues.max()
+            val noiseFloor = maxRms * 0.02 // не ловим "биты" в тишине
 
-                val isPeak = rmsValues[i] > avg * SENSITIVITY &&
-                        rmsValues[i] > rmsValues[i - 1] &&
-                        rmsValues[i] >= rmsValues[i + 1]
+            fun detect(sensitivity: Double): List<Double> {
+                val found = mutableListOf<Double>()
+                var lastBeat = -1.0
+                for (i in PEAK_WINDOW until rmsValues.size - PEAK_WINDOW) {
+                    val from = (i - PEAK_WINDOW).coerceAtLeast(0)
+                    val to = (i + PEAK_WINDOW).coerceAtMost(rmsValues.size - 1)
+                    var sum = 0.0
+                    for (j in from..to) sum += rmsValues[j]
+                    val avg = sum / (to - from + 1)
 
-                val tSec = rmsTimesMs[i] / 1000.0
-                if (isPeak && (lastBeat < 0 || tSec - lastBeat >= MIN_BEAT_INTERVAL)) {
-                    beats.add(tSec)
-                    lastBeat = tSec
+                    val v = rmsValues[i]
+                    val isPeak = v > avg * sensitivity &&
+                            v > rmsValues[i - 1] &&
+                            v >= rmsValues[i + 1] &&
+                            v > noiseFloor
+
+                    val tSec = rmsTimesMs[i] / 1000.0
+                    if (isPeak && (lastBeat < 0 || tSec - lastBeat >= MIN_BEAT_INTERVAL)) {
+                        found.add(tSec)
+                        lastBeat = tSec
+                    }
                 }
+                return found
+            }
+
+            var beats: List<Double> = emptyList()
+            for (pass in SENSITIVITY_PASSES) {
+                beats = detect(pass)
+                if (beats.size >= 8) break // ✅ достаточно — дальше не смягчаем
             }
 
             if (beats.size < MIN_BEATS) {
                 return Result(emptyList(), 0.0, waveform, durationSec)
             }
 
-            // === BPM по медиане интервалов ===
-            val intervals = mutableListOf<Double>()
-            for (i in 1 until beats.size) {
-                intervals.add(beats[i] - beats[i - 1])
+            // Защита от частокола
+            val finalBeats = if (beats.size > MAX_BEATS) {
+                val step = Math.ceil(beats.size / MAX_BEATS.toDouble()).toInt()
+                beats.filterIndexed { idx, _ -> idx % step == 0 }
+            } else {
+                beats
             }
-            intervals.sort()
-            val median = intervals[intervals.size / 2]
-            val bpm = if (median > 0) 60.0 / median else 0.0
 
-            return Result(beats, bpm, waveform, durationSec)
+            // ==========================================
+            // BPM по медиане интервалов
+            // ==========================================
+            val intervals = mutableListOf<Double>()
+            for (i in 1 until finalBeats.size) {
+                intervals.add(finalBeats[i] - finalBeats[i - 1])
+            }
+            val bpm = if (intervals.isEmpty()) {
+                0.0
+            } else {
+                intervals.sort()
+                val median = intervals[intervals.size / 2]
+                if (median > 0) 60.0 / median else 0.0
+            }
+
+            return Result(finalBeats, bpm, waveform, durationSec)
         } finally {
             try { decoder?.stop() } catch (_: Throwable) {}
             try { decoder?.release() } catch (_: Throwable) {}

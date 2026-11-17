@@ -2,9 +2,11 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 // ==========================================
-// Детектор битов музыки через нативный MediaCodec (без FFmpeg)
-// ✅ Кэш + ✅ Waveform для визуализации
+// Детектор битов через нативный MediaCodec (без FFmpeg)
+// ✅ Кэш + waveform + октавная нормализация BPM + отладка
 // ==========================================
+
+const bool kBeatDebug = true;
 
 class BeatAnalysis {
   final List<double> beats;
@@ -19,8 +21,20 @@ class BeatAnalysis {
     this.durationSec = 0,
   });
 
-  bool get isValid => beats.length >= 4 && bpm > 40 && bpm < 220;
+  // ✅ Валидность = есть биты; BPM уже нормализован по октавам
+  bool get isValid => beats.length >= 4 && bpm > 0;
   bool get hasWaveform => waveform.isNotEmpty;
+
+  /// Медианный интервал между битами (сек)
+  double get medianInterval {
+    if (beats.length < 2) return 0;
+    final d = <double>[];
+    for (int i = 1; i < beats.length; i++) {
+      d.add(beats[i] - beats[i - 1]);
+    }
+    d.sort();
+    return d[d.length ~/ 2];
+  }
 }
 
 class BeatDetector {
@@ -44,8 +58,10 @@ class BeatDetector {
 
     final cached = _cache[key];
     if (cached != null) {
-      print('⚡ BeatDetector: кэш для ${audioPath.split('/').last} '
-          '(${cached.beats.length} битов, BPM ~${cached.bpm.round()})');
+      if (kBeatDebug) {
+        print('⚡ BeatDetector: кэш ${audioPath.split('/').last} '
+            '(${cached.beats.length} битов, BPM ~${cached.bpm.round()})');
+      }
       return cached;
     }
 
@@ -75,7 +91,9 @@ class BeatDetector {
         waveform: cur.waveform,
         durationSec: cur.durationSec,
       );
-      print('✏️ BeatDetector: биты отредактированы вручную (${newBeats.length})');
+      if (kBeatDebug) {
+        print('✏️ BeatDetector: биты отредактированы вручную (${newBeats.length})');
+      }
     }
   }
 
@@ -85,7 +103,7 @@ class BeatDetector {
   }
 
   // ==========================================
-  // Нативный анализ через BeatAnalyzer.kt
+  // Нативный анализ + октавная нормализация BPM
   // ==========================================
   static Future<BeatAnalysis> _detectBeatsInternal(String audioPath) async {
     try {
@@ -100,7 +118,7 @@ class BeatDetector {
       });
 
       if (result is! Map) {
-        print('⚠️ BeatDetector: неожиданный ответ от натива');
+        print('⚠️ BeatDetector: неожиданный ответ от натива: $result');
         return const BeatAnalysis(beats: [], bpm: 0);
       }
 
@@ -116,7 +134,14 @@ class BeatDetector {
         }
       }
 
-      final bpm = bpmRaw is num ? bpmRaw.toDouble() : 0.0;
+      final rawBpm = bpmRaw is num ? bpmRaw.toDouble() : 0.0;
+
+      // ✅ Октавная нормализация: приводим BPM в 40..220
+      double bpm = rawBpm;
+      if (bpm > 0) {
+        while (bpm < 40) bpm *= 2;
+        while (bpm > 220) bpm /= 2;
+      }
 
       final waveform = <double>[];
       if (waveRaw is List) {
@@ -127,7 +152,21 @@ class BeatDetector {
 
       final durationSec = durRaw is num ? durRaw.toDouble() : 0.0;
 
-      print('🎵 BeatDetector: ${beats.length} битов, BPM ~${bpm.round()}');
+      if (kBeatDebug) {
+        final interval = beats.length >= 2
+            ? (beats[beats.length ~/ 2] - beats[beats.length ~/ 2 - 1])
+            : 0.0;
+        print('🎵 BeatDetector: ${beats.length} битов, '
+            'BPM raw=${rawBpm.toStringAsFixed(1)} → norm=${bpm.toStringAsFixed(1)}, '
+            'интервал≈${interval.toStringAsFixed(2)}с, '
+            'первый=${beats.isNotEmpty ? beats.first.toStringAsFixed(2) : '-'}с, '
+            'последний=${beats.isNotEmpty ? beats.last.toStringAsFixed(2) : '-'}с, '
+            'длительность=${durationSec.toStringAsFixed(1)}с');
+        if (beats.length < 4) {
+          print('⚠️ BeatDetector: мало битов (${beats.length}) — синк будет отклонён');
+        }
+      }
+
       return BeatAnalysis(
         beats: beats,
         bpm: bpm,

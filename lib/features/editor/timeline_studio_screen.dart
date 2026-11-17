@@ -11,8 +11,14 @@ import '../../data/models/photo_layer.dart';
 import '../../data/models/text_layer.dart';
 import '../../data/providers/project_provider.dart';
 import '../../data/providers/projects_provider.dart';
-import 'audio_tools.dart'; // ✅ НОВОЕ: для showAudioManagerSheet
+import 'audio_tools.dart';
+import 'playback.dart';
 
+// ==========================================
+// 🎬 Timeline Studio: полноэкранный мультитрек-таймлайн
+// ✅ Транспорт: |< ▶ >| + глобальный плейхед со звуком
+// ✅ Биты: тонкие маркеры + переключатель видимости
+// ==========================================
 class TimelineStudioScreen extends ConsumerStatefulWidget {
   const TimelineStudioScreen({super.key});
 
@@ -24,7 +30,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   final ScrollController _scroll = ScrollController();
 
   double _sliderValue = 0.4;
-  double _playheadMs = 0;
+  bool _showBeats = true;
   List<double>? _editedBeats;
   BeatAnalysis? _analysis;
   bool _loading = true;
@@ -43,7 +49,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   @override
   void initState() {
     super.initState();
-    _playheadMs = ref.read(playheadMsProvider);
     _loadBeats();
   }
 
@@ -103,7 +108,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     final totalMsAudio = a.durationSec * 1000;
     final n = a.waveform.length;
     final i0 = (_audioOffsetMs / totalMsAudio * n).floor().clamp(0, n - 1);
-    final i1 = ((_audioOffsetMs + audioVisibleMs) / totalMsAudio * n).ceil().clamp(i0 + 1, n);
+    final i1 =
+        ((_audioOffsetMs + audioVisibleMs) / totalMsAudio * n).ceil().clamp(i0 + 1, n);
     return a.waveform.sublist(i0, i1);
   }
 
@@ -126,7 +132,12 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     final texts = project.texts;
     final starts = _frameStarts(photos);
 
-    final totalVideo = photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
+    // ✅ Глобальный плейхед (синхронен с редактором и звуком)
+    final playheadMs = ref.watch(playheadMsProvider);
+    final isPlaying = ref.watch(isPlayingProvider);
+
+    final totalVideo =
+        photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
     final textEnd = texts.isEmpty
         ? 0.0
         : texts.map((t) => t.endTimeMilliseconds.toDouble()).reduce(math.max);
@@ -134,10 +145,14 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
 
     final audioDurMs = (_analysis?.durationSec ?? 0) * 1000;
     final audioVisibleMs = (totalVideo > _audioOffsetMs)
-        ? math.min(audioDurMs, totalVideo - _audioOffsetMs).clamp(0.0, audioDurMs).toDouble()
+        ? math.min(audioDurMs, totalVideo - _audioOffsetMs)
+            .clamp(0.0, audioDurMs)
+            .toDouble()
         : 0.0;
 
     final contentWidth = _padLeft + totalMs * _pxPerMs + 160;
+    final scrollOffset = _scroll.hasClients ? _scroll.offset : 0.0;
+    final playheadX = _padLeft + playheadMs * _pxPerMs - scrollOffset;
 
     const double tracksHeight = _videoH + _audioH + _textH + 2;
 
@@ -150,11 +165,15 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
           icon: const Icon(Icons.close, size: 24),
           color: AppColors.textPrimary,
           tooltip: 'Свернуть',
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            ref.read(isPlayingProvider.notifier).state = false;
+            Navigator.pop(context);
+          },
         ),
         title: Text(
           'Таймлайн-студия',
-          style: GoogleFonts.unbounded(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+          style: GoogleFonts.unbounded(
+              fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
         ),
         actions: [
           IconButton(
@@ -162,8 +181,10 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
             color: AppColors.primary,
             tooltip: 'Готово (сохранить)',
             onPressed: () async {
-              ref.read(playheadMsProvider.notifier).state = _playheadMs;
-              await ref.read(projectRepositoryProvider).saveProject(ref.read(currentProjectProvider));
+              ref.read(isPlayingProvider.notifier).state = false;
+              await ref
+                  .read(projectRepositoryProvider)
+                  .saveProject(ref.read(currentProjectProvider));
               ref.read(projectsProvider.notifier).refresh();
               if (mounted) Navigator.pop(context);
             },
@@ -179,117 +200,180 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                     builder: (context, constraints) {
                       final topOffset = (constraints.maxHeight - tracksHeight) / 2;
                       return Stack(
-  children: [
-    Positioned(
-      top: topOffset.clamp(0.0, constraints.maxHeight) - 12,
-      left: 8,
-      right: 8,
-      height: tracksHeight + 24,
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF16181A),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.primary.withValues(alpha: 0.15)),
-        ),
-      ),
-    ),
-    Positioned(
-      top: topOffset.clamp(0.0, constraints.maxHeight),
-      left: 0,
-      right: 0,
-      height: tracksHeight,
-      child: SingleChildScrollView(
-        controller: _scroll,
-        scrollDirection: Axis.horizontal,
-        child: SizedBox(
-          width: contentWidth,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildVideoTrack(photos, starts),
-              Container(height: 1, color: AppColors.divider),
-              _buildAudioTrack(totalVideo, audioVisibleMs),
-              Container(height: 1, color: AppColors.divider),
-              _buildTextTrack(texts),
-            ],
-          ),
-        ),
-      ),
-    ),
-    Positioned(
-      top: topOffset.clamp(0.0, constraints.maxHeight),
-      left: 0,
-      right: 0,
-      height: tracksHeight,
-      child: IgnorePointer(
-        child: CustomPaint(
-          painter: _PlayheadPainter(
-            x: _padLeft + _playheadMs * _pxPerMs - (_scroll.hasClients ? _scroll.offset : 0),
-            color: AppColors.primary,
-          ),
-        ),
-      ),
-    ),
-    Positioned(
-      top: topOffset.clamp(0.0, constraints.maxHeight) - 4,
-      left: _padLeft + _playheadMs * _pxPerMs - (_scroll.hasClients ? _scroll.offset : 0) - 12,
-      child: _PlayheadHandle(
-        onDrag: (dx) {
-          setState(() {
-            _playheadMs += dx / _pxPerMs;
-            _playheadMs = _playheadMs.clamp(0.0, totalMs).toDouble();
-          });
-        },
-        onEnd: () {
-          ref.read(playheadMsProvider.notifier).state = _playheadMs;
-        },
-      ),
-    ),
-    Positioned(
-      top: topOffset.clamp(0.0, constraints.maxHeight),
-      left: 0,
-      height: tracksHeight,
-      child: Container(
-        width: _padLeft,
-        color: const Color(0xFF16181A).withOpacity(0.85),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            SizedBox(height: _videoH, child: const Center(child: Icon(Icons.videocam_outlined, size: 16, color: AppColors.textMuted))),
-            SizedBox(height: _audioH, child: const Center(child: Icon(Icons.music_note, size: 16, color: AppColors.textMuted))),
-            SizedBox(height: _textH, child: const Center(child: Icon(Icons.text_fields, size: 16, color: AppColors.textMuted))),
-          ],
-        ),
-      ),
-    ),
-  ],
-);
+                        children: [
+                          Positioned(
+                            top: topOffset.clamp(0.0, constraints.maxHeight) - 12,
+                            left: 8,
+                            right: 8,
+                            height: tracksHeight + 24,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF16181A),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: AppColors.primary.withValues(alpha: 0.15)),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: topOffset.clamp(0.0, constraints.maxHeight),
+                            left: 0,
+                            right: 0,
+                            height: tracksHeight,
+                            child: SingleChildScrollView(
+                              controller: _scroll,
+                              scrollDirection: Axis.horizontal,
+                              child: SizedBox(
+                                width: contentWidth,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildVideoTrack(photos, starts),
+                                    Container(height: 1, color: AppColors.divider),
+                                    _buildAudioTrack(totalVideo, audioVisibleMs),
+                                    Container(height: 1, color: AppColors.divider),
+                                    _buildTextTrack(texts),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: topOffset.clamp(0.0, constraints.maxHeight),
+                            left: 0,
+                            right: 0,
+                            height: tracksHeight,
+                            child: IgnorePointer(
+                              child: CustomPaint(
+                                painter: _PlayheadPainter(
+                                  x: playheadX,
+                                  color: AppColors.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: topOffset.clamp(0.0, constraints.maxHeight) - 4,
+                            left: playheadX - 12,
+                            child: _PlayheadHandle(
+                              onDrag: (dx) {
+                                final next =
+                                    (playheadMs + dx / _pxPerMs).clamp(0.0, totalMs);
+                                ref.read(playheadMsProvider.notifier).state =
+                                    next.toDouble();
+                              },
+                            ),
+                          ),
+                          Positioned(
+                            top: topOffset.clamp(0.0, constraints.maxHeight),
+                            left: 0,
+                            height: tracksHeight,
+                            child: Container(
+                              width: _padLeft,
+                              color: const Color(0xFF16181A).withOpacity(0.85),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                      height: _videoH,
+                                      child: const Center(
+                                          child: Icon(Icons.videocam_outlined,
+                                              size: 16, color: AppColors.textMuted))),
+                                  SizedBox(
+                                      height: _audioH,
+                                      child: const Center(
+                                          child: Icon(Icons.music_note,
+                                              size: 16, color: AppColors.textMuted))),
+                                  SizedBox(
+                                      height: _textH,
+                                      child: const Center(
+                                          child: Icon(Icons.text_fields,
+                                              size: 16, color: AppColors.textMuted))),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
                     },
                   ),
           ),
+          // ==========================================
+          // ✅ НИЖНЯЯ ПАНЕЛЬ: транспорт + зум + биты
+          // ==========================================
           Container(
             color: AppColors.surface,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                const Icon(Icons.zoom_out, size: 18, color: AppColors.textMuted),
-                Expanded(
-                  child: Slider(
-                    value: _sliderValue,
-                    min: 0.0,
-                    max: 1.0,
-                    activeColor: AppColors.primary,
-                    inactiveColor: AppColors.surfaceLight,
-                    onChanged: (v) => setState(() => _sliderValue = v),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      _TransportButton(
+                        icon: Icons.skip_previous,
+                        onTap: () {
+                          ref.read(isPlayingProvider.notifier).state = false;
+                          ref.read(playheadMsProvider.notifier).state = 0;
+                          if (_scroll.hasClients) _scroll.jumpTo(0);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _TransportButton(
+                        icon: isPlaying ? Icons.pause : Icons.play_arrow,
+                        accent: true,
+                        onTap: () => togglePlayback(ref),
+                      ),
+                      const SizedBox(width: 8),
+                      _TransportButton(
+                        icon: Icons.skip_next,
+                        onTap: () {
+                          ref.read(isPlayingProvider.notifier).state = false;
+                          ref.read(playheadMsProvider.notifier).state = totalMs;
+                          if (_scroll.hasClients) {
+                            _scroll.jumpTo(_scroll.position.maxScrollExtent);
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        '${(playheadMs / 1000).toStringAsFixed(1)}s / ${(totalMs / 1000).toStringAsFixed(1)}s',
+                        style: GoogleFonts.jetBrainsMono(
+                            fontSize: 12, color: AppColors.primary),
+                      ),
+                      const Spacer(),
+                      // ✅ Переключатель видимости битов
+                      IconButton(
+                        icon: Icon(
+                          Icons.graphic_eq,
+                          size: 20,
+                          color: _showBeats ? AppColors.primary : AppColors.textMuted,
+                        ),
+                        tooltip: _showBeats ? 'Скрыть биты' : 'Показать биты',
+                        onPressed: () => setState(() => _showBeats = !_showBeats),
+                      ),
+                    ],
                   ),
-                ),
-                const Icon(Icons.zoom_in, size: 18, color: AppColors.textMuted),
-                const SizedBox(width: 12),
-                Text(
-                  '${(_playheadMs / 1000).toStringAsFixed(1)}s / ${(totalMs / 1000).toStringAsFixed(1)}s',
-                  style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(Icons.zoom_out, size: 18, color: AppColors.textMuted),
+                      Expanded(
+                        child: Slider(
+                          value: _sliderValue,
+                          min: 0.0,
+                          max: 1.0,
+                          activeColor: AppColors.primary,
+                          inactiveColor: AppColors.surfaceLight,
+                          onChanged: (v) => setState(() => _sliderValue = v),
+                        ),
+                      ),
+                      const Icon(Icons.zoom_in, size: 18, color: AppColors.textMuted),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -327,7 +411,9 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                     newDur = snapped - start;
                   }
                   newDur = newDur.clamp(300.0, 10000.0).toDouble();
-                  ref.read(currentProjectProvider.notifier).updatePhotoDuration(i, newDur.round());
+                  ref
+                      .read(currentProjectProvider.notifier)
+                      .updatePhotoDuration(i, newDur.round());
                 },
                 onResizeEnd: () {
                   ref.read(currentProjectProvider.notifier).endBatch();
@@ -339,9 +425,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
-  // ==========================================
-  // ✅ ПЕРЕПИСАНО: дорожка музыки всегда видима и кликабельна
-  // ==========================================
   Widget _buildAudioTrack(double totalVideo, double audioVisibleMs) {
     final track = ref.watch(currentProjectProvider).audioTrack;
     final wave = _visibleWave(audioVisibleMs);
@@ -350,11 +433,9 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     return SizedBox(
       height: _audioH,
       child: GestureDetector(
-        // ✅ Тап открывает панель управления музыкой
         onTap: () => showMusicSourcePicker(context, ref),
         child: Stack(
           children: [
-            // Блок дорожки (всегда рисуется)
             Positioned(
               left: _padLeft,
               width: trackWidth > 8 ? trackWidth : 8,
@@ -401,8 +482,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                             ),
                             if (track != null && audioVisibleMs > 0)
                               Text(
-                                '${(audioVisibleMs / 1000).toStringAsFixed(1)}с '
-                                '• Громкость ${(track.volume * 100).round()}%',
+                                '${(audioVisibleMs / 1000).toStringAsFixed(1)}s • '
+                                'Громкость ${(track.volume * 100).round()}%',
                                 style: GoogleFonts.manrope(
                                   fontSize: 10,
                                   color: AppColors.textMuted,
@@ -411,17 +492,13 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                           ],
                         ),
                       ),
-                      const Icon(
-                        Icons.chevron_right,
-                        color: AppColors.textMuted,
-                        size: 18,
-                      ),
+                      const Icon(Icons.chevron_right,
+                          color: AppColors.textMuted, size: 18),
                     ],
                   ),
                 ),
               ),
             ),
-            // ✅ Waveform поверх блока (если есть)
             if (wave.isNotEmpty)
               Positioned(
                 left: _padLeft + _audioOffsetMs * _pxPerMs,
@@ -437,34 +514,35 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                   ),
                 ),
               ),
-            // Маркеры битов (если есть)
-            for (int i = 0; i < _beats.length; i++)
-              if (_beatMs(i) <= totalVideo)
-                Positioned(
-                  left: _padLeft + _beatMs(i) * _pxPerMs - 12,
-                  width: 24,
-                  top: 0,
-                  bottom: 0,
-                  child: _BeatMarker(
-                    onDrag: (dx) {
-                      setState(() {
-                        _editedBeats = List<double>.from(_beats);
-                        final deltaSec = (dx / _pxPerMs) / 1000;
-                        final min = i > 0 ? _editedBeats![i - 1] + 0.05 : 0.0;
-                        final max = i < _editedBeats!.length - 1
-                            ? _editedBeats![i + 1] - 0.05
-                            : 9999.0;
-                        _editedBeats![i] =
-                            (_editedBeats![i] + deltaSec).clamp(min, max).toDouble();
-                      });
-                    },
-                    onEnd: () {
-                      if (_editedBeats != null) {
-                        BeatDetector.overrideBeats(track!.filePath, _editedBeats!);
-                      }
-                    },
+            // ✅ Биты: тонкие, полупрозрачные, отключаемые
+            if (_showBeats)
+              for (int i = 0; i < _beats.length; i++)
+                if (_beatMs(i) <= totalVideo)
+                  Positioned(
+                    left: _padLeft + _beatMs(i) * _pxPerMs - 6,
+                    width: 12,
+                    top: 0,
+                    bottom: 0,
+                    child: _BeatMarker(
+                      onDrag: (dx) {
+                        setState(() {
+                          _editedBeats = List<double>.from(_beats);
+                          final deltaSec = (dx / _pxPerMs) / 1000;
+                          final min = i > 0 ? _editedBeats![i - 1] + 0.05 : 0.0;
+                          final max = i < _editedBeats!.length - 1
+                              ? _editedBeats![i + 1] - 0.05
+                              : 9999.0;
+                          _editedBeats![i] =
+                              (_editedBeats![i] + deltaSec).clamp(min, max).toDouble();
+                        });
+                      },
+                      onEnd: () {
+                        if (_editedBeats != null) {
+                          BeatDetector.overrideBeats(track!.filePath, _editedBeats!);
+                        }
+                      },
+                    ),
                   ),
-                ),
           ],
         ),
       ),
@@ -476,7 +554,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
       return SizedBox(
         height: _textH,
         child: Center(
-          child: Text('Текста нет', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
+          child:
+              Text('Текста нет', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
         ),
       );
     }
@@ -487,7 +566,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
           for (int i = 0; i < texts.length; i++)
             Positioned(
               left: _padLeft + texts[i].startTimeMilliseconds * _pxPerMs,
-              width: math.max(12, (texts[i].endTimeMilliseconds - texts[i].startTimeMilliseconds) * _pxPerMs - 2),
+              width: math.max(
+                  12, (texts[i].endTimeMilliseconds - texts[i].startTimeMilliseconds) * _pxPerMs - 2),
               top: 8,
               bottom: 8,
               child: _TextBlock(
@@ -506,6 +586,38 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// ✅ Кнопка транспорта
+// ==========================================
+class _TransportButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool accent;
+
+  const _TransportButton({
+    required this.icon,
+    required this.onTap,
+    this.accent = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: accent ? 44 : 36,
+        height: 32,
+        decoration: BoxDecoration(
+          color: accent ? AppColors.primary : AppColors.surfaceLight,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+        ),
+        child: Icon(icon, size: accent ? 20 : 18, color: accent ? Colors.white : AppColors.textPrimary),
       ),
     );
   }
@@ -543,7 +655,8 @@ class _VideoBlockState extends State<_VideoBlock> {
         decoration: BoxDecoration(
           color: AppColors.surfaceLight,
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: widget.isSelected ? AppColors.primary : Colors.transparent, width: 2),
+          border: Border.all(
+              color: widget.isSelected ? AppColors.primary : Colors.transparent, width: 2),
         ),
         child: Stack(
           children: [
@@ -600,7 +713,12 @@ class _BeatMarkerState extends State<_BeatMarker> {
       onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
       onHorizontalDragEnd: (_) => widget.onEnd(),
       child: Center(
-        child: Container(width: 2, height: double.infinity, color: AppColors.aiAccent.withOpacity(0.8)),
+        // ✅ Тонкая полупрозрачная линия — не кричит, но видна
+        child: Container(
+          width: 1.5,
+          height: double.infinity,
+          color: AppColors.aiAccent.withOpacity(0.45),
+        ),
       ),
     );
   }
@@ -653,9 +771,8 @@ class _TextBlockState extends State<_TextBlock> {
 
 class _PlayheadHandle extends StatefulWidget {
   final ValueChanged<double> onDrag;
-  final VoidCallback onEnd;
 
-  const _PlayheadHandle({required this.onDrag, required this.onEnd});
+  const _PlayheadHandle({required this.onDrag});
 
   @override
   State<_PlayheadHandle> createState() => _PlayheadHandleState();
@@ -666,7 +783,6 @@ class _PlayheadHandleState extends State<_PlayheadHandle> {
   Widget build(BuildContext context) {
     return GestureDetector(
       onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
-      onHorizontalDragEnd: (_) => widget.onEnd(),
       child: Container(
         width: 24,
         height: 24,

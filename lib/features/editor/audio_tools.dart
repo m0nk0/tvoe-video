@@ -40,8 +40,7 @@ bool isPlayerLoadedWith(AudioPlayer player, String path) {
 }
 
 // ==========================================
-// ✅ ГЛАВНАЯ ТОЧКА ВХОДА: умный выбор музыки
-// Трек есть → сразу редактор. Трека нет → лист источников.
+// ✅ Единая точка входа: умный выбор музыки
 // ==========================================
 void showMusicSourcePicker(BuildContext context, WidgetRef ref) {
   final track = ref.read(currentProjectProvider).audioTrack;
@@ -53,8 +52,7 @@ void showMusicSourcePicker(BuildContext context, WidgetRef ref) {
 }
 
 // ==========================================
-// ✅ ПРИМЕНЕНИЕ ТРЕКА
-// openEditor = true → после применения открыть панель «Музыка»
+// ✅ Применение трека
 // ==========================================
 Future<void> _applyTrack(
   BuildContext context,
@@ -96,6 +94,39 @@ Future<void> _applyTrack(
       );
     }
   }
+}
+
+// ==========================================
+// ✅ Loading-диалог: Material + явный стиль
+// ==========================================
+Widget _loadingDialog(String text) {
+  return Material(
+    type: MaterialType.transparency,
+    child: Center(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(color: AppColors.primary),
+            const SizedBox(height: 16),
+            Text(
+              text,
+              style: GoogleFonts.manrope(
+                fontSize: 14,
+                color: AppColors.textPrimary,
+                decoration: TextDecoration.none,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 // ==========================================
@@ -197,9 +228,7 @@ void _showMusicSourceSheet(BuildContext context, WidgetRef ref) {
 
 // ==========================================
 // ✅ ПАНЕЛЬ «МУЗЫКА» (редактор)
-// Все внутренние списки открываются с openEditorAfter: true,
-// чтобы после тапа по треку ВЕРНУТЬСЯ сюда.
-// Внизу — кнопка «Применить».
+// Источники открываются ПОВЕРХ панели (без pop → без мёртвых контекстов)
 // ==========================================
 void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
   showModalBottomSheet(
@@ -249,9 +278,8 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                 child: ElevatedButton.icon(
                   onPressed: () {
                     HapticFeedback.lightImpact();
-                    Navigator.pop(sheetContext);
-                    // ✅ true: после выбора трека вернёмся в эту панель
-                    _showDeviceMusicSheet(context, ref, openEditorAfter: true);
+                    // ✅ НЕ закрываем панель: список ляжет поверх
+                    _showDeviceMusicSheet(sheetContext, ref, openEditorAfter: false);
                   },
                   icon: const Icon(Icons.library_music),
                   label: const Text('Музыка на устройстве'),
@@ -268,10 +296,8 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                 child: ElevatedButton.icon(
                   onPressed: () {
                     HapticFeedback.lightImpact();
-                    Navigator.pop(sheetContext);
-                    // ✅ true: после выбора трека вернёмся в эту панель
-                    _showMediaLibraryMusicSheet(context, ref,
-                        openEditorAfter: true);
+                    // ✅ НЕ закрываем панель: список ляжет поверх
+                    _showMediaLibraryMusicSheet(sheetContext, ref, openEditorAfter: false);
                   },
                   icon: const Icon(Icons.album_outlined),
                   label: const Text('Из медиатеки'),
@@ -288,11 +314,9 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () async {
-                        Navigator.pop(sheetContext);
                         final track = await pickAudioFromDevice();
-                        if (track != null && context.mounted) {
-                          await _applyTrack(context, ref, track,
-                              openEditor: true);
+                        if (track != null && sheetContext.mounted) {
+                          await _applyTrack(sheetContext, ref, track, openEditor: false);
                         }
                       },
                       icon: const Icon(Icons.folder_open),
@@ -307,9 +331,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () {
-                        Navigator.pop(sheetContext);
-                        _showUrlInputDialog(context, ref,
-                            openEditorAfter: true);
+                        _showUrlInputDialog(sheetContext, ref, openEditorAfter: false);
                       },
                       icon: const Icon(Icons.cloud_download),
                       label: const Text('Из интернета'),
@@ -326,10 +348,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   onPressed: canSyncBeat
-                      ? () {
-                          Navigator.pop(sheetContext);
-                          _syncToBeat(context, ref);
-                        }
+                      ? () => _syncToBeat(sheetContext, ref)
                       : null,
                   icon: const Icon(Icons.graphic_eq),
                   label: const Text('Синхронизировать по битам'),
@@ -347,8 +366,7 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
                     'Нужны фото на таймлайне и музыка в проекте',
-                    style:
-                        GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
+                    style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
                   ),
                 ),
               const SizedBox(height: 12),
@@ -369,8 +387,6 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
               ),
               const SizedBox(height: 16),
               const _CurrentTrackWidget(),
-
-              // ✅ НОВОЕ: кнопка «Применить» — закрыть панель, оставив настройки
               const SizedBox(height: 16),
               Consumer(
                 builder: (context, ref2, _) {
@@ -394,15 +410,13 @@ void showAudioManagerSheet(BuildContext context, WidgetRef ref) {
                       icon: const Icon(Icons.check, size: 22),
                       label: Text(
                         'Применить',
-                        style: GoogleFonts.manrope(
-                            fontSize: 16, fontWeight: FontWeight.w700),
+                        style: GoogleFonts.manrope(fontSize: 16, fontWeight: FontWeight.w700),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
                     ),
                   );
@@ -474,8 +488,7 @@ Future<void> _showMediaLibraryMusicSheet(
                   const SizedBox(height: 4),
                   Text(
                     files.isEmpty ? 'Медиатека пуста' : 'Треков: ${files.length}',
-                    style:
-                        GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                    style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -487,8 +500,7 @@ Future<void> _showMediaLibraryMusicSheet(
                       child: Padding(
                         padding: EdgeInsets.all(32),
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.music_off,
-                              size: 48, color: AppColors.textMuted),
+                          Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
                           SizedBox(height: 12),
                           Text('Сначала загрузи треки',
                               textAlign: TextAlign.center,
@@ -499,8 +511,7 @@ Future<void> _showMediaLibraryMusicSheet(
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: files.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 68),
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
                       itemBuilder: (context, index) {
                         final file = files[index];
                         final name = MediaStorageService.displayName(file);
@@ -513,13 +524,11 @@ Future<void> _showMediaLibraryMusicSheet(
                               title: name,
                               isFromInternet: false,
                             );
-                            _applyTrack(context, ref, track,
-                                openEditor: openEditorAfter);
+                            _applyTrack(context, ref, track, openEditor: openEditorAfter);
                           },
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Row(
                               children: [
                                 Container(
@@ -530,17 +539,14 @@ Future<void> _showMediaLibraryMusicSheet(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Icon(
-                                    isBundled
-                                        ? Icons.auto_awesome
-                                        : Icons.music_note,
+                                    isBundled ? Icons.auto_awesome : Icons.music_note,
                                     color: AppColors.primary,
                                   ),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         name,
@@ -556,17 +562,14 @@ Future<void> _showMediaLibraryMusicSheet(
                                       Text(
                                         isBundled
                                             ? '✨ Встроенный'
-                                            : MediaStorageService.formatBytes(
-                                                file),
+                                            : MediaStorageService.formatBytes(file),
                                         style: GoogleFonts.manrope(
-                                            fontSize: 11,
-                                            color: AppColors.textMuted),
+                                            fontSize: 11, color: AppColors.textMuted),
                                       ),
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.chevron_right,
-                                    color: AppColors.textMuted),
+                                const Icon(Icons.chevron_right, color: AppColors.textMuted),
                               ],
                             ),
                           ),
@@ -592,24 +595,7 @@ Future<void> _showDeviceMusicSheet(
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (loadingContext) => Center(
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: AppColors.primary),
-            const SizedBox(height: 16),
-            Text('Поиск музыки…',
-                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
-          ],
-        ),
-      ),
-    ),
+    builder: (_) => _loadingDialog('Поиск музыки…'),
   );
 
   final granted = await requestAudioPermission();
@@ -670,11 +656,8 @@ Future<void> _showDeviceMusicSheet(
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    tracks.isEmpty
-                        ? 'Ничего не найдено'
-                        : 'Найдено треков: ${tracks.length}',
-                    style:
-                        GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                    tracks.isEmpty ? 'Ничего не найдено' : 'Найдено треков: ${tracks.length}',
+                    style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -686,8 +669,7 @@ Future<void> _showDeviceMusicSheet(
                       child: Padding(
                         padding: EdgeInsets.all(32),
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.music_off,
-                              size: 48, color: AppColors.textMuted),
+                          Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
                           SizedBox(height: 12),
                           Text('Скопируйте музыку в папку Music или Download',
                               textAlign: TextAlign.center,
@@ -698,21 +680,18 @@ Future<void> _showDeviceMusicSheet(
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: tracks.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 68),
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
                       itemBuilder: (context, index) {
                         final track = tracks[index];
                         final folder = _folderOf(track.filePath);
                         return InkWell(
                           onTap: () {
                             Navigator.pop(sheetContext);
-                            _applyTrack(context, ref, track,
-                                openEditor: openEditorAfter);
+                            _applyTrack(context, ref, track, openEditor: openEditorAfter);
                           },
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Row(
                               children: [
                                 Container(
@@ -722,14 +701,12 @@ Future<void> _showDeviceMusicSheet(
                                     color: AppColors.primary.withOpacity(0.15),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: const Icon(Icons.music_note,
-                                      color: AppColors.primary),
+                                  child: const Icon(Icons.music_note, color: AppColors.primary),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         track.title,
@@ -745,16 +722,14 @@ Future<void> _showDeviceMusicSheet(
                                       Text(
                                         folder,
                                         style: GoogleFonts.manrope(
-                                            fontSize: 11,
-                                            color: AppColors.textMuted),
+                                            fontSize: 11, color: AppColors.textMuted),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.chevron_right,
-                                    color: AppColors.textMuted),
+                                const Icon(Icons.chevron_right, color: AppColors.textMuted),
                               ],
                             ),
                           ),
@@ -770,7 +745,9 @@ Future<void> _showDeviceMusicSheet(
 }
 
 // ==========================================
-// Синхронизация по битам
+// ✅ СИНХРОНИЗАЦИЯ ПО БИТАМ (регулярная сетка от BPM)
+// nLong/nShort вычисляются из period, чтобы длинный кадр ≤ 4 с
+// и короткий ≠ длинному (без схлопывания в однородность).
 // ==========================================
 Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   final project = ref.read(currentProjectProvider);
@@ -780,24 +757,7 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (_) => Center(
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: AppColors.primary),
-            const SizedBox(height: 16),
-            Text('Анализирую биты…',
-                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
-          ],
-        ),
-      ),
-    ),
+    builder: (_) => _loadingDialog('Анализирую биты…'),
   );
 
   final analysis = await BeatDetector.detectBeats(track.filePath);
@@ -806,6 +766,9 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
   Navigator.pop(context);
 
   if (!analysis.isValid) {
+    if (kBeatDebug) {
+      print('⚠️ sync: отклонено — битов ${analysis.beats.length}, bpm ${analysis.bpm}');
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Не удалось определить биты в этом треке'),
@@ -816,21 +779,46 @@ Future<void> _syncToBeat(BuildContext context, WidgetRef ref) async {
     return;
   }
 
+  final beats = analysis.beats;
+
+  // Регулярная сетка из нормализованного BPM
+  double period = analysis.bpm > 0 ? 60.0 / analysis.bpm : 1.0;
+  period = period.clamp(0.35, 2.0);
+  final double phase = beats.isNotEmpty ? (beats.first % period) : 0.0;
+
+  const double maxDur = 4.0;
+  const double minDur = 0.8;
+
+  // ✅ Counts из period: длинный влезает в потолок, короткий = 60% длинного
+  final int nLong = math.max(2, (maxDur / period).floor());
+  final int nShort = math.max(1, (nLong * 0.6).round());
+  final List<int> pattern = [nShort, nLong, nShort, nLong];
+
+  if (kBeatDebug) {
+    print('🎬 sync: трек=${track.title}, BPM=${analysis.bpm.toStringAsFixed(1)}, '
+        'period=${period.toStringAsFixed(2)}с, phase=${phase.toStringAsFixed(2)}с, '
+        'nShort=$nShort, nLong=$nLong, maxDur=$maxDur (grid-режим)');
+  }
+
   final notifier = ref.read(currentProjectProvider.notifier);
   notifier.beginBatch();
   try {
-    const beatsPerPhoto = 2;
-    final beats = analysis.beats;
     int synced = 0;
+    double currentTime = 0;
 
     for (int i = 0; i < project.photos.length; i++) {
-      final startIdx = i * beatsPerPhoto;
-      if (startIdx >= beats.length - 1) break;
-      final endIdx = math.min((i + 1) * beatsPerPhoto, beats.length - 1);
-      double sec = beats[endIdx] - beats[startIdx];
-      sec = sec.clamp(0.8, 6.0);
-      notifier.updatePhotoDuration(i, (sec * 1000).round());
+      final int n = pattern[i % pattern.length];
+      double dur = n * period + (i == 0 ? phase : 0.0);
+      dur = dur.clamp(minDur, maxDur);
+
+      notifier.updatePhotoDuration(i, (dur * 1000).round());
+      currentTime += dur;
       synced++;
+
+      if (kBeatDebug) {
+        print('🎬 sync: кадр $i → $n×period = ${dur.toStringAsFixed(2)}с '
+            '(граница ${currentTime.toStringAsFixed(2)}с)');
+      }
     }
 
     if (context.mounted) {
@@ -888,8 +876,7 @@ Future<AudioTrack> _storeTrack(WidgetRef ref, AudioTrack track) async {
 
   if (track.filePath.startsWith(musicDirPath)) return track;
 
-  final storedPath =
-      await storage.importMusic(track.filePath, title: track.title);
+  final storedPath = await storage.importMusic(track.filePath, title: track.title);
 
   if (storedPath == null || storedPath.isEmpty) {
     throw Exception('importMusic вернул пустой путь');
@@ -945,8 +932,7 @@ void _showUrlInputDialog(
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(dialogContext),
-          child:
-              Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          child: Text('Отмена', style: GoogleFonts.manrope(color: AppColors.textMuted)),
         ),
         ElevatedButton(
           onPressed: () async {
@@ -957,25 +943,7 @@ void _showUrlInputDialog(
             showDialog(
               context: context,
               barrierDismissible: false,
-              builder: (loadingContext) => Center(
-                child: Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const CircularProgressIndicator(color: AppColors.primary),
-                      const SizedBox(height: 16),
-                      Text('Скачивание…',
-                          style:
-                              GoogleFonts.manrope(color: AppColors.textPrimary)),
-                    ],
-                  ),
-                ),
-              ),
+              builder: (_) => _loadingDialog('Скачивание…'),
             );
 
             final track = await downloadAudioFromUrl(url);
@@ -983,8 +951,7 @@ void _showUrlInputDialog(
             if (context.mounted) {
               Navigator.pop(context);
               if (track != null) {
-                await _applyTrack(context, ref, track,
-                    openEditor: openEditorAfter);
+                await _applyTrack(context, ref, track, openEditor: openEditorAfter);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -999,8 +966,7 @@ void _showUrlInputDialog(
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
           ),
-          child:
-              Text('Скачать', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+          child: Text('Скачать', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
         ),
       ],
     ),
@@ -1141,9 +1107,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
                   activeColor: AppColors.primary,
                   inactiveColor: AppColors.surfaceLight,
                   onChanged: (value) {
-                    ref
-                        .read(currentProjectProvider.notifier)
-                        .updateAudioVolume(value);
+                    ref.read(currentProjectProvider.notifier).updateAudioVolume(value);
                     player.setVolume(value);
                   },
                 ),
@@ -1154,8 +1118,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
                 width: 44,
                 child: Text(
                   '${(track.volume * 100).round()}%',
-                  style:
-                      GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary),
+                  style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary),
                   textAlign: TextAlign.right,
                 ),
               ),
@@ -1203,9 +1166,7 @@ class _CurrentTrackWidget extends ConsumerWidget {
             activeColor: AppColors.primary,
             inactiveColor: AppColors.surfaceLight,
             onChanged: (value) {
-              ref
-                  .read(currentProjectProvider.notifier)
-                  .updateAudioStartTime(value);
+              ref.read(currentProjectProvider.notifier).updateAudioStartTime(value);
             },
           ),
         ],
@@ -1225,24 +1186,7 @@ Future<void> showDeviceMusicBrowser(
   showDialog(
     context: context,
     barrierDismissible: false,
-    builder: (loadingContext) => Center(
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(color: AppColors.primary),
-            const SizedBox(height: 16),
-            Text('Поиск музыки…',
-                style: GoogleFonts.manrope(color: AppColors.textPrimary)),
-          ],
-        ),
-      ),
-    ),
+    builder: (_) => _loadingDialog('Поиск музыки…'),
   );
 
   final granted = await requestAudioPermission();
@@ -1303,11 +1247,8 @@ Future<void> showDeviceMusicBrowser(
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    tracks.isEmpty
-                        ? 'Ничего не найдено'
-                        : 'Найдено треков: ${tracks.length}',
-                    style:
-                        GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
+                    tracks.isEmpty ? 'Ничего не найдено' : 'Найдено треков: ${tracks.length}',
+                    style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted),
                   ),
                 ],
               ),
@@ -1319,8 +1260,7 @@ Future<void> showDeviceMusicBrowser(
                       child: Padding(
                         padding: EdgeInsets.all(32),
                         child: Column(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.music_off,
-                              size: 48, color: AppColors.textMuted),
+                          Icon(Icons.music_off, size: 48, color: AppColors.textMuted),
                           SizedBox(height: 12),
                           Text('Скопируйте музыку в папку Music или Download',
                               textAlign: TextAlign.center,
@@ -1331,8 +1271,7 @@ Future<void> showDeviceMusicBrowser(
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: tracks.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(height: 1, indent: 68),
+                      separatorBuilder: (_, __) => const Divider(height: 1, indent: 68),
                       itemBuilder: (context, index) {
                         final track = tracks[index];
                         final folder = _folderOf(track.filePath);
@@ -1346,8 +1285,7 @@ Future<void> showDeviceMusicBrowser(
                                   HapticFeedback.mediumImpact();
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text(
-                                          '🎵 «${stored.title}» добавлен в медиатеку'),
+                                      content: Text('🎵 «${stored.title}» добавлен в медиатеку'),
                                       backgroundColor: Colors.green,
                                     ),
                                   );
@@ -1363,14 +1301,12 @@ Future<void> showDeviceMusicBrowser(
                                 }
                               }
                             } else {
-                              await _applyTrack(context, ref, track,
-                                  openEditor: false);
+                              await _applyTrack(context, ref, track, openEditor: false);
                             }
                           },
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 12),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             child: Row(
                               children: [
                                 Container(
@@ -1380,14 +1316,12 @@ Future<void> showDeviceMusicBrowser(
                                     color: AppColors.primary.withOpacity(0.15),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: const Icon(Icons.music_note,
-                                      color: AppColors.primary),
+                                  child: const Icon(Icons.music_note, color: AppColors.primary),
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         track.title,
@@ -1403,14 +1337,12 @@ Future<void> showDeviceMusicBrowser(
                                       Text(
                                         folder,
                                         style: GoogleFonts.manrope(
-                                            fontSize: 11,
-                                            color: AppColors.textMuted),
+                                            fontSize: 11, color: AppColors.textMuted),
                                       ),
                                     ],
                                   ),
                                 ),
-                                const Icon(Icons.chevron_right,
-                                    color: AppColors.textMuted),
+                                const Icon(Icons.chevron_right, color: AppColors.textMuted),
                               ],
                             ),
                           ),
