@@ -1,129 +1,189 @@
 import 'dart:io';
-
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'bundled_music_service.dart';
 
-/// Сервис хранения медиафайлов проекта:
-/// - клипы:  {documents}/tvoe_video/clips/
-/// - музыка: {documents}/tvoe_video/music/
-/// - фото:   {documents}/tvoe_video/photos/
 class MediaStorageService {
-  late Directory _clipsDir;
-  late Directory _musicDir;
-  late Directory _photosDir;
+  static final MediaStorageService _instance = MediaStorageService._internal();
+  factory MediaStorageService() => _instance;
+  MediaStorageService._internal();
 
-  Directory get clipsDir => _clipsDir;
-  Directory get musicDir => _musicDir;
+  late final Directory _appDir;
+  late final Directory _photosDir;
+  late final Directory _musicDir;
+  late final Directory _clipsDir;
+  late final Directory _exportsDir;
+  bool _initialized = false;
+
+  Directory get appDir => _appDir;
   Directory get photosDir => _photosDir;
+  Directory get musicDir => _musicDir;
+  Directory get clipsDir => _clipsDir;
+  Directory get exportsDir => _exportsDir;
 
-  static const _musicExts = [
-    'mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'wma', 'opus',
-  ];
-
-  static const _photoExts = [
-    'jpg', 'jpeg', 'png', 'webp', 'bmp', 'heic',
-  ];
-
-  /// Создаёт папки проекта при первом запуске
+  // ==========================================
+  // Инициализация: создаём рабочие папки
+  // ==========================================
   Future<void> init() async {
-    final docs = await getApplicationDocumentsDirectory();
-    final root = Directory('${docs.path}/tvoe_video');
-    _clipsDir = Directory('${root.path}/clips');
-    _musicDir = Directory('${root.path}/music');
-    _photosDir = Directory('${root.path}/photos');
-    if (!_clipsDir.existsSync()) _clipsDir.createSync(recursive: true);
-    if (!_musicDir.existsSync()) _musicDir.createSync(recursive: true);
-    if (!_photosDir.existsSync()) _photosDir.createSync(recursive: true);
+    if (_initialized) return;
+    _appDir = await getApplicationDocumentsDirectory();
+    _photosDir = Directory('${_appDir.path}/photos');
+    _musicDir = Directory('${_appDir.path}/music');
+    _clipsDir = Directory('${_appDir.path}/clips');
+    _exportsDir = Directory('${_appDir.path}/exports');
+    for (final d in [_photosDir, _musicDir, _clipsDir, _exportsDir]) {
+      if (!d.existsSync()) d.createSync(recursive: true);
+    }
+    _initialized = true;
+    print('📂 MediaStorage: папки готовы');
   }
 
-  /// Копирует аудиофайл в папку музыки проекта.
-  Future<String> importMusic(String sourcePath, {String? title}) async {
-    final src = File(sourcePath);
-    if (!src.existsSync()) throw Exception('Файл не найден: $sourcePath');
-    final ext = _extOf(sourcePath);
-    final name =
-        '${DateTime.now().microsecondsSinceEpoch}_${_safeName(title ?? 'track')}.$ext';
-    final dest = File('${_musicDir.path}/$name');
-    await src.copy(dest.path);
-    return dest.path;
+  Future<void> _ensureInit() async {
+    if (!_initialized) await init();
   }
 
-  /// ✅ Копирует фото в папку фото проекта.
-  /// Возвращает путь копии.
-  Future<String> importPhoto(String sourcePath) async {
-    final src = File(sourcePath);
-    if (!src.existsSync()) throw Exception('Файл не найден: $sourcePath');
-    final extRaw = _extOf(sourcePath);
-    final ext = _photoExts.contains(extRaw) ? extRaw : 'jpg';
-    final name =
-        '${DateTime.now().microsecondsSinceEpoch}_${_safeName('photo')}.$ext';
-    final dest = File('${_photosDir.path}/$name');
-    await src.copy(dest.path);
-    return dest.path;
+  // ==========================================
+  // 📸 Фото: импорт из галереи/камеры
+  // ==========================================
+  Future<String?> importPhoto(String srcPath) async {
+    await _ensureInit();
+    try {
+      final src = File(srcPath);
+      if (!src.existsSync()) return null;
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ext = srcPath.split('.').last.toLowerCase();
+      final safeExt = ['jpg', 'jpeg', 'png', 'webp', 'heic'].contains(ext) ? ext : 'jpg';
+      final dst = '${_photosDir.path}/photo_$ts.$safeExt';
+      src.copySync(dst);
+      print('📸 Фото импортировано: $dst');
+      return dst;
+    } catch (e) {
+      print('❌ importPhoto: $e');
+      return null;
+    }
   }
 
-  /// Сохраняет экспортированный клип в папку клипов проекта.
-  Future<String> saveClip(String sourcePath, {String? title}) async {
-    final src = File(sourcePath);
-    if (!src.existsSync()) throw Exception('Файл не найден: $sourcePath');
-    final name =
-        '${DateTime.now().microsecondsSinceEpoch}_${_safeName(title ?? 'clip')}.mp4';
-    final dest = File('${_clipsDir.path}/$name');
-    await src.copy(dest.path);
-    return dest.path;
+  // ==========================================
+  // 🎵 Музыка: импорт с устройства/из URL
+  // ==========================================
+  Future<String?> importMusic(String srcPath, {String? title}) async {
+    await _ensureInit();
+    try {
+      final src = File(srcPath);
+      if (!src.existsSync()) return null;
+      // если уже в папке music/ — не копируем
+      if (srcPath.startsWith(_musicDir.path)) return srcPath;
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ext = srcPath.split('.').last.toLowerCase();
+      final safeExt = ['mp3', 'wav', 'm4a', 'ogg', 'aac'].contains(ext) ? ext : 'mp3';
+      final safeTitle = (title ?? 'track').replaceAll(RegExp(r'[^a-zA-Z0-9а-яА-Я_\-]'), '_');
+      final dst = '${_musicDir.path}/${safeTitle}_$ts.$safeExt';
+      src.copySync(dst);
+      print('🎵 Музыка импортирована: $dst');
+      return dst;
+    } catch (e) {
+      print('❌ importMusic: $e');
+      return null;
+    }
   }
 
-  /// Список клипов (новые сверху)
-  List<File> listClips() => _list(_clipsDir, ['mp4']);
-
-  /// Список сохранённых треков (новые сверху)
-  List<File> listMusic() => _list(_musicDir, _musicExts);
-
-  /// ✅ Список сохранённых фото (новые сверху)
-  List<File> listPhotos() => _list(_photosDir, _photoExts);
-
-  /// Человекочитаемое имя из имени файла (убираем timestamp-префикс)
-  static String displayName(File f) {
-    var name = f.uri.pathSegments.last;
-    name = name.replaceFirst(RegExp(r'^\d+_'), '');
-    final dot = name.lastIndexOf('.');
-    if (dot > 0) name = name.substring(0, dot);
-    return name.replaceAll('_', ' ').trim();
+  // ==========================================
+  // 🎬 Клипы: импорт экспортированного видео/GIF в медиатеку
+  // ==========================================
+  Future<String?> importClip(String srcPath) async {
+    await _ensureInit();
+    try {
+      final src = File(srcPath);
+      if (!src.existsSync()) return null;
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ext = srcPath.endsWith('.gif') ? 'gif' : 'mp4';
+      final dst = '${_clipsDir.path}/clip_$ts.$ext';
+      src.copySync(dst);
+      print('🎬 Клип импортирован: $dst');
+      return dst;
+    } catch (e) {
+      print('❌ importClip: $e');
+      return null;
+    }
   }
 
-  /// Размер файла в читаемом виде
-  static String formatBytes(File f) {
-    final bytes = f.lengthSync();
-    if (bytes < 1024) return '$bytes Б';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} КБ';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ';
-  }
+  // ==========================================
+  // Списки файлов
+  // ==========================================
+  List<File> listPhotos() => _listDir(_photosDir);
+  List<File> listMusic() => _listDir(_musicDir);
+  List<File> listClips() => _listDir(_clipsDir);
 
-  // ---------- служебное ----------
-
-  List<File> _list(Directory dir, List<String> exts) {
+  List<File> _listDir(Directory dir) {
     if (!dir.existsSync()) return [];
-    final files = dir
+    return dir
         .listSync()
         .whereType<File>()
-        .where((f) => exts.contains(_extOf(f.path)))
-        .toList();
-    files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
-    return files;
+        .where((f) => !f.path.endsWith('.part'))
+        .toList()
+      ..sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
   }
 
-  static String _extOf(String path) {
-    final dot = path.lastIndexOf('.');
-    if (dot < 0) return 'bin';
-    return path.substring(dot + 1).toLowerCase();
+  // ==========================================
+  // Удаление
+  // ==========================================
+  bool deleteFile(String path) {
+    try {
+      final f = File(path);
+      if (f.existsSync()) f.deleteSync();
+      return true;
+    } catch (e) {
+      print('❌ deleteFile: $e');
+      return false;
+    }
   }
 
-  static String _safeName(String s) => s
-      .replaceAll(RegExp(r'[^\w\dа-яА-ЯёЁ\-]+'), '_')
-      .replaceAll(RegExp(r'_+'), '_');
+  /// Очистка всех пользовательских файлов (сброс проекта)
+  Future<int> clearAll() async {
+    int deleted = 0;
+    for (final dir in [_photosDir, _musicDir, _clipsDir, _exportsDir]) {
+      if (!dir.existsSync()) continue;
+      for (final f in dir.listSync().whereType<File>()) {
+        // bundled-треки оставляем
+        if (BundledMusicService.isBundled(f)) continue;
+        try {
+          f.deleteSync();
+          deleted++;
+        } catch (_) {}
+      }
+    }
+    print('🧹 Очищено файлов: $deleted');
+    return deleted;
+  }
+
+  // ==========================================
+  // Хелперы отображения
+  // ==========================================
+  static String displayName(File file) {
+    try {
+      final name = file.path.split('/').last;
+      // убираем timestamp-хвост: photo_123456.jpg -> photo
+      final stripped = name.replaceAll(RegExp(r'_\d{10,}\.'), '.');
+      final base = stripped.contains('.')
+          ? stripped.substring(0, stripped.lastIndexOf('.'))
+          : stripped;
+      if (base.isEmpty) return name;
+      return base;
+    } catch (_) {
+      return file.path.split('/').last;
+    }
+  }
+
+  static String formatBytes(File file) {
+    try {
+      final bytes = file.lengthSync();
+      if (bytes < 1024) return '$bytes B';
+      if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} КБ';
+      if (bytes < 1024 * 1024 * 1024) {
+        return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} МБ';
+      }
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} ГБ';
+    } catch (_) {
+      return '?';
+    }
+  }
 }
-
-/// Провайдер сервиса (переопределяется в main.dart после init)
-final mediaStorageProvider = Provider<MediaStorageService>((ref) {
-  throw UnimplementedError('mediaStorageProvider must be overridden in main.dart');
-});

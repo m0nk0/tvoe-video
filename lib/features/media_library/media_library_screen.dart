@@ -13,6 +13,7 @@ import 'widgets/clips_tab.dart';
 import 'widgets/import_tile.dart';
 import 'widgets/music_tab.dart';
 import 'widgets/photos_tab.dart';
+import '../../data/providers/media_storage_provider.dart';
 
 class MediaLibraryScreen extends ConsumerStatefulWidget {
   final void Function(AudioTrack track)? onUseMusic;

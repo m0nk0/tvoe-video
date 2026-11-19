@@ -30,13 +30,13 @@ class ExportResult {
   });
 }
 
-/// Сервис экспорта проекта в MP4 видео.
+/// Сервис экспорта проекта в MP4 видео / GIF.
 /// Видео кодируется нативным Android MediaCodec, звук — MediaExtractor + AAC + MediaMuxer.
 /// Никаких сторонних плагинов для рендера.
 class ExportService {
   static const int _defaultFps = 30;
 
-  /// Канал нативного экспортёра (см. MainActivity.kt / VideoEncoder.kt / AudioMuxer.kt)
+  /// Канал нативного экспортёра (MainActivity.kt / VideoEncoder.kt / AudioMuxer.kt / GifEncoder.kt)
   static const MethodChannel _channel =
       MethodChannel('com.tvoymagazine.tvoe_video/exporter');
 
@@ -168,12 +168,10 @@ class ExportService {
         onProgress?.call(1.0);
 
         if (mixed) {
-          // ✅ Удаляем немой файл ТОЛЬКО когда микс реально удался
           _cleanup([silentVideoPath]);
           return ExportResult(videoPath: finalVideoPath, hasAudio: true);
         }
 
-        // ✅ Немой файл НЕ удалён — используем его как fallback
         if (!_moveFile(silentVideoPath, finalVideoPath)) {
           lastError = 'Не удалось подготовить файл видео';
           _cleanup([silentVideoPath, finalVideoPath]);
@@ -301,7 +299,6 @@ class ExportService {
 
   // ==========================================
   // ✅ ШАГ 2: нативное микширование звука
-  // MP3 → PCM (громкость/задержка/фейд/обрезка) → AAC → MediaMuxer
   // ==========================================
   static Future<bool> _mixWithAudio({
     required String videoPath,
@@ -420,7 +417,6 @@ class ExportService {
   }) async {
     final currentPhoto = project.photos[currentSegmentIndex];
 
-    // ✅ Кэш вместо декодирования JPEG на каждый кадр
     final uiImage = await _loadImage(currentPhoto.imagePath);
     if (uiImage == null) return;
 
@@ -440,7 +436,6 @@ class ExportService {
       offsetY: currentPhoto.offsetY,
     );
 
-    // 🎬 Ken Burns + Cinematic с интенсивностью
     final elapsedMsForMotion = frameProgress * currentPhoto.durationMilliseconds;
     final motionT = currentPhoto.durationMilliseconds > 0
         ? (elapsedMsForMotion / currentPhoto.durationMilliseconds).clamp(0.0, 1.0)
@@ -547,9 +542,6 @@ class ExportService {
       }
     }
 
-    // ==========================================
-    // Переход (фото рисуется в liveDst с учётом Ken Burns + Cinematic)
-    // ==========================================
     switch (currentPhoto.transition) {
       case TransitionType.none:
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
@@ -869,6 +861,131 @@ class ExportService {
       case AnimationType.none:
         textPainter.paint(canvas, Offset(x, y));
         break;
+    }
+  }
+
+  // ==========================================
+  // ✅ GIF-экспорт: ВЕСЬ клип сжимается в ≤10 с (ускорение),
+  //    все кадры входят в GIF, ничего не обрезается
+  // ==========================================
+  static Future<String?> exportGif({
+    required VideoProject project,
+    VideoFormat? format,
+    String? outputFileName,
+    Function(double)? onProgress,
+    bool Function()? cancelChecker,
+  }) async {
+    lastError = null;
+    if (project.photos.isEmpty) {
+      lastError = 'В проекте нет кадров';
+      return null;
+    }
+
+    final fmt = format ?? project.format;
+    const int gifW = 480;
+    final int gifH = (gifW * fmt.height / fmt.width).round();
+    const int fps = 10;
+    const int maxSec = 10;
+
+    final appDir = await getApplicationDocumentsDirectory();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final base = (outputFileName != null && outputFileName.trim().isNotEmpty)
+        ? _sanitizeFileName(outputFileName.trim())
+        : 'tvoe_gif_$ts';
+    final path = '${appDir.path}/$base.gif';
+
+    // ✅ Весь проект сжимается в maxSec: шаг = totalMs / totalFrames
+    final double totalMs = project.totalDurationMs.toDouble();
+    final double targetMs = math.min(totalMs, maxSec * 1000.0);
+    final int totalFrames = (targetMs / 1000 * fps).ceil();
+    if (totalFrames <= 0) {
+      lastError = 'Нулевая длительность проекта';
+      return null;
+    }
+    final double msPerFrame = totalMs / totalFrames;
+
+    print('🎞 GIF-план: totalMs=${totalMs.toStringAsFixed(0)}, '
+        'targetMs=${targetMs.toStringAsFixed(0)}, кадров=$totalFrames, '
+        'шаг=${msPerFrame.toStringAsFixed(0)}мс, '
+        'ускорение=×${(totalMs / targetMs).toStringAsFixed(2)}');
+
+    bool started = false;
+    try {
+      await _channel.invokeMethod('gifStart', {
+        'width': gifW,
+        'height': gifH,
+        'fps': fps,
+        'path': path,
+      });
+      started = true;
+
+      int rendered = 0;
+      int lastLoggedSeg = -1;
+      for (int f = 0; f < totalFrames; f++) {
+        if (cancelChecker != null && cancelChecker()) {
+          try {
+            await _channel.invokeMethod('gifCancel');
+          } catch (_) {}
+          _cleanup([path]);
+          lastError = 'Экспорт отменён';
+          return null;
+        }
+        final double tMs = f * msPerFrame;
+
+        int acc = 0;
+        int seg = 0;
+        double local = 0;
+        for (int i = 0; i < project.photos.length; i++) {
+          final d = project.photos[i].durationMilliseconds;
+          if (tMs < acc + d || i == project.photos.length - 1) {
+            seg = i;
+            local = d > 0 ? ((tMs - acc) / d).clamp(0.0, 1.0) : 0.0;
+            break;
+          }
+          acc += d;
+        }
+
+        // ✅ Диагностика: логируем смену сегмента
+        if (seg != lastLoggedSeg) {
+          print('🎞 GIF: кадр $f → сегмент $seg (t=${tMs.toStringAsFixed(0)}мс)');
+          lastLoggedSeg = seg;
+        }
+
+        final rgba = await _renderFrame(
+          project: project,
+          currentSegmentIndex: seg,
+          frameProgress: local,
+          width: gifW,
+          height: gifH,
+        );
+        if (rgba == null) throw Exception('Не удалось отрисовать кадр $f');
+        await _channel.invokeMethod('gifFrame', rgba);
+        rendered++;
+        onProgress?.call(rendered / totalFrames);
+      }
+
+      await _channel.invokeMethod('gifFinish');
+      final file = File(path);
+      if (!file.existsSync() || file.lengthSync() < 100) {
+        lastError = 'GIF не создан';
+        _cleanup([path]);
+        return null;
+      }
+      print('✅ GIF: $rendered кадров (ускорение ×${(totalMs / targetMs).toStringAsFixed(2)}), '
+          '${(file.lengthSync() / 1024 / 1024).toStringAsFixed(2)} МБ');
+      return path;
+    } catch (e) {
+      print('❌ Ошибка GIF: $e');
+      lastError = 'Ошибка GIF: $e';
+      if (started) {
+        try {
+          await _channel.invokeMethod('gifCancel');
+        } catch (_) {}
+      }
+      _cleanup([path]);
+      return null;
+    } finally {
+      _clearImageCache();
     }
   }
 

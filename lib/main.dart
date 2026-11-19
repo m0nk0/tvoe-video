@@ -15,6 +15,7 @@ import 'data/models/template.dart';
 import 'data/models/text_layer.dart';
 import 'data/models/video_project.dart';
 import 'data/providers/projects_provider.dart';
+import 'data/providers/media_storage_provider.dart'; // ✅ провайдер mediaStorageProvider
 import 'data/repositories/project_repository.dart';
 import 'features/home/home_screen.dart';
 import 'data/services/media_storage_service.dart';
@@ -110,6 +111,13 @@ Future<void> _createDemoProject() async {
       // Импортируем в локальное хранилище приложения
       final localPath = await mediaStorage.importPhoto(tempFile.path);
 
+      // ✅ Защита: если импорт не удался, пропускаем фото (а не крашимся)
+      if (localPath == null) {
+        print('⚠️ Не удалось импортировать демо-фото $assetName: importPhoto вернул null');
+        if (tempFile.existsSync()) tempFile.deleteSync();
+        continue;
+      }
+
       // Создаем PhotoLayer с разнообразными эффектами для демонстрации
       photoLayers.add(PhotoLayer(
         imagePath: localPath,
@@ -150,7 +158,7 @@ Future<void> _createDemoProject() async {
     id: const Uuid().v4(),
     name: '🔥 Тестовый проект (не удалять)',
     photos: photoLayers,
-        texts: [
+    texts: [
       TextLayer(
         text: 'Твоё Видео',
         startTimeMilliseconds: 0,

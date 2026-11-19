@@ -2,13 +2,15 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
-
+export 'media_storage_provider.dart';
 import '../models/audio_track.dart';
 import '../models/photo_layer.dart';
 import '../models/text_layer.dart';
 import '../models/video_project.dart';
 import '../services/media_storage_service.dart';
+import 'media_storage_provider.dart';
 import 'projects_provider.dart';
+
 
 final currentProjectProvider = StateNotifierProvider<ProjectNotifier, VideoProject>((ref) {
   return ProjectNotifier(ref);
@@ -204,9 +206,16 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     final storage = _ref.read(mediaStorageProvider);
     final newPhotos = <PhotoLayer>[];
 
-    for (final img in images) {
+        for (final img in images) {
       try {
         final storedPath = await storage.importPhoto(img.path);
+        
+        // ✅ Защита: если импорт не удался, пропускаем фото
+        if (storedPath == null) {
+          print('⚠️ Пропуск фото (importPhoto вернул null): ${img.path}');
+          continue;
+        }
+        
         print('📸 ФОТО СОХРАНЕНО В ПАПКУ: $storedPath');
         try {
           final cacheFile = File(img.path);

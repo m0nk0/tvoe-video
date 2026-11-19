@@ -17,6 +17,7 @@ class MainActivity : FlutterActivity() {
     private var worker: Handler? = null
     private val main = Handler(Looper.getMainLooper())
     private var encoder: VideoEncoder? = null
+    private var gif: GifEncoder? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -44,12 +45,10 @@ class MainActivity : FlutterActivity() {
                         val fps = call.argument<Int>("fps") ?: 30
                         val bitrate = call.argument<Int>("bitrate") ?: 6_000_000
                         val path = call.argument<String>("path")
-
                         if (width <= 0 || height <= 0 || path.isNullOrEmpty()) {
                             result.error("BAD_ARGS", "Неверные параметры start", null)
                             return@setMethodCallHandler
                         }
-
                         w.post {
                             try {
                                 abortOnWorker()
@@ -57,59 +56,31 @@ class MainActivity : FlutterActivity() {
                                 enc.start()
                                 encoder = enc
                                 ok(result, true)
-                            } catch (e: Throwable) {
-                                abortOnWorker()
-                                fail(result, e)
-                            }
+                            } catch (e: Throwable) { abortOnWorker(); fail(result, e) }
                         }
                     }
 
                     "feedFrame" -> {
                         val bytes = call.arguments as? ByteArray
-                        if (bytes == null) {
-                            result.error("BAD_ARGS", "Ожидались байты кадра (Uint8List)", null)
-                            return@setMethodCallHandler
-                        }
+                        if (bytes == null) { result.error("BAD_ARGS", "Ожидались байты кадра", null); return@setMethodCallHandler }
                         w.post {
                             val enc = encoder
-                            if (enc == null) {
-                                fail(result, IllegalStateException("Энкодер не запущен"))
-                                return@post
-                            }
-                            try {
-                                enc.feedFrame(bytes)
-                                ok(result, true)
-                            } catch (e: Throwable) {
-                                abortOnWorker()
-                                fail(result, e)
-                            }
+                            if (enc == null) { fail(result, IllegalStateException("Энкодер не запущен")); return@post }
+                            try { enc.feedFrame(bytes); ok(result, true) }
+                            catch (e: Throwable) { abortOnWorker(); fail(result, e) }
                         }
                     }
 
                     "finish" -> {
                         w.post {
                             val enc = encoder
-                            if (enc == null) {
-                                fail(result, IllegalStateException("Энкодер не запущен"))
-                                return@post
-                            }
-                            try {
-                                val path = enc.finish()
-                                encoder = null
-                                ok(result, path)
-                            } catch (e: Throwable) {
-                                abortOnWorker()
-                                fail(result, e)
-                            }
+                            if (enc == null) { fail(result, IllegalStateException("Энкодер не запущен")); return@post }
+                            try { val p = enc.finish(); encoder = null; ok(result, p) }
+                            catch (e: Throwable) { abortOnWorker(); fail(result, e) }
                         }
                     }
 
-                    "cancel" -> {
-                        w.post {
-                            abortOnWorker()
-                            ok(result, true)
-                        }
-                    }
+                    "cancel" -> { w.post { abortOnWorker(); ok(result, true) } }
 
                     "muxAudio" -> {
                         val videoPath = call.argument<String>("videoPath")
@@ -118,55 +89,75 @@ class MainActivity : FlutterActivity() {
                         val volume = (call.argument<Number>("volume"))?.toDouble() ?: 1.0
                         val startSec = (call.argument<Number>("startTime"))?.toDouble() ?: 0.0
                         val durationMs = call.argument<Int>("durationMs") ?: 0
-
-                        if (videoPath.isNullOrEmpty() ||
-                            audioPath.isNullOrEmpty() ||
-                            outputPath.isNullOrEmpty() ||
-                            durationMs <= 0
-                        ) {
+                        if (videoPath.isNullOrEmpty() || audioPath.isNullOrEmpty() || outputPath.isNullOrEmpty() || durationMs <= 0) {
                             result.error("BAD_ARGS", "Неверные параметры muxAudio", null)
                             return@setMethodCallHandler
                         }
-
                         w.post {
                             try {
-                                val path = AudioMuxer.mux(
-                                    videoPath = videoPath,
-                                    audioPath = audioPath,
-                                    outputPath = outputPath,
-                                    volume = volume,
-                                    startSec = startSec,
-                                    durationMs = durationMs
-                                )
-                                ok(result, path)
-                            } catch (e: Throwable) {
-                                fail(result, e)
-                            }
+                                val p = AudioMuxer.mux(videoPath, audioPath, outputPath, volume, startSec, durationMs)
+                                ok(result, p)
+                            } catch (e: Throwable) { fail(result, e) }
                         }
                     }
 
-                    // ✅ ШАГ 3: анализ битов
                     "analyzeBeats" -> {
                         val audioPath = call.argument<String>("audioPath")
-                        if (audioPath.isNullOrEmpty()) {
-                            result.error("BAD_ARGS", "Нет audioPath", null)
-                            return@setMethodCallHandler
-                        }
+                        if (audioPath.isNullOrEmpty()) { result.error("BAD_ARGS", "Нет audioPath", null); return@setMethodCallHandler }
                         w.post {
                             try {
                                 val r = BeatAnalyzer.analyze(audioPath)
                                 val map = HashMap<String, Any?>()
-                                map["beats"] = r.beats
-                                map["bpm"] = r.bpm
-                                map["waveform"] = r.waveform
-                                map["durationSec"] = r.durationSec
+                                map["beats"] = r.beats; map["bpm"] = r.bpm
+                                map["waveform"] = r.waveform; map["durationSec"] = r.durationSec
                                 map["isValid"] = r.isValid()
                                 ok(result, map)
-                            } catch (e: Throwable) {
-                                fail(result, e)
-                            }
+                            } catch (e: Throwable) { fail(result, e) }
                         }
                     }
+
+                    // ✅ GIF
+                    "gifStart" -> {
+                        val width = call.argument<Int>("width") ?: 0
+                        val height = call.argument<Int>("height") ?: 0
+                        val fps = call.argument<Int>("fps") ?: 10
+                        val path = call.argument<String>("path")
+                        if (width <= 0 || height <= 0 || path.isNullOrEmpty()) {
+                            result.error("BAD_ARGS", "Неверные параметры gifStart", null)
+                            return@setMethodCallHandler
+                        }
+                        w.post {
+                            try {
+                                gif?.abort()
+                                val delayCs = (100.0 / fps).toInt().coerceAtLeast(2)
+                                val g = GifEncoder(width, height, delayCs, 0, path)
+                                gif = g
+                                ok(result, true)
+                            } catch (e: Throwable) { gif?.abort(); gif = null; fail(result, e) }
+                        }
+                    }
+
+                    "gifFrame" -> {
+                        val bytes = call.arguments as? ByteArray
+                        if (bytes == null) { result.error("BAD_ARGS", "Ожидались байты кадра", null); return@setMethodCallHandler }
+                        w.post {
+                            val g = gif
+                            if (g == null) { fail(result, IllegalStateException("GIF не запущен")); return@post }
+                            try { g.feedFrame(bytes); ok(result, true) }
+                            catch (e: Throwable) { g.abort(); gif = null; fail(result, e) }
+                        }
+                    }
+
+                    "gifFinish" -> {
+                        w.post {
+                            val g = gif
+                            if (g == null) { fail(result, IllegalStateException("GIF не запущен")); return@post }
+                            try { val p = g.finish(); gif = null; ok(result, p) }
+                            catch (e: Throwable) { g.abort(); gif = null; fail(result, e) }
+                        }
+                    }
+
+                    "gifCancel" -> { w.post { gif?.abort(); gif = null; ok(result, true) } }
 
                     else -> result.notImplemented()
                 }
@@ -178,20 +169,16 @@ class MainActivity : FlutterActivity() {
         encoder = null
     }
 
-    private fun ok(result: MethodChannel.Result, value: Any) {
-        main.post { result.success(value) }
-    }
-
+    private fun ok(result: MethodChannel.Result, value: Any) { main.post { result.success(value) } }
     private fun fail(result: MethodChannel.Result, e: Throwable) {
         val msg = e.message ?: e.javaClass.simpleName
         main.post { result.error("ENCODER_ERROR", msg, null) }
     }
 
     override fun onDestroy() {
-        try { worker?.post { abortOnWorker() } } catch (_: Throwable) {}
+        try { worker?.post { abortOnWorker(); gif?.abort(); gif = null } } catch (_: Throwable) {}
         try { workerThread?.quitSafely() } catch (_: Throwable) {}
-        workerThread = null
-        worker = null
+        workerThread = null; worker = null
         super.onDestroy()
     }
 }
