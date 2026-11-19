@@ -22,7 +22,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   final Ref _ref;
 
   // ==========================================
-  // ✅ НОВОЕ: Стек истории для Undo/Redo
+  // ✅ Стек истории для Undo/Redo
   // ==========================================
   final List<VideoProject> _history = [];
   int _historyIndex = -1;
@@ -391,6 +391,34 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   }
 
   // ==========================================
+  // ✅ Фаза 1a: дублирование и разделение кадра
+  // ==========================================
+
+  void duplicatePhoto(int index) {
+    if (index < 0 || index >= state.photos.length) return;
+    _commitHistory();
+    final copy = state.photos[index];
+    final newPhotos = List<PhotoLayer>.from(state.photos)..insert(index + 1, copy);
+    state = state.copyWith(photos: newPhotos);
+    _ref.read(selectedPhotoIndexProvider.notifier).state = index + 1;
+  }
+
+  /// Разделить кадр в точке atMs (локальное время внутри кадра).
+  void splitPhoto(int index, int atMs) {
+    if (index < 0 || index >= state.photos.length) return;
+    final p = state.photos[index];
+    if (atMs <= 0 || atMs >= p.durationMilliseconds) return;
+    _commitHistory();
+    final left = p.copyWith(durationMilliseconds: atMs);
+    final right = p.copyWith(durationMilliseconds: p.durationMilliseconds - atMs);
+    final newPhotos = List<PhotoLayer>.from(state.photos);
+    newPhotos[index] = left;
+    newPhotos.insert(index + 1, right);
+    state = state.copyWith(photos: newPhotos);
+    _ref.read(selectedPhotoIndexProvider.notifier).state = index + 1;
+  }
+
+  // ==========================================
   // Текст
   // ==========================================
 
@@ -425,7 +453,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
 
   void removeAudioTrack() {
     _commitHistory();
-    // ✅ ИСПРАВЛЕНО: сохраняем оверлеи/интенсивности (раньше терялись)
+    // ✅ сохраняем оверлеи/интенсивности
     state = VideoProject(
       id: state.id,
       name: state.name,
