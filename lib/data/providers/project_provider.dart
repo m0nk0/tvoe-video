@@ -17,6 +17,8 @@ final currentProjectProvider = StateNotifierProvider<ProjectNotifier, VideoProje
 final selectedPhotoIndexProvider = StateProvider<int>((ref) => 0);
 final playheadMsProvider = StateProvider<double>((ref) => 0.0);
 final isPlayingProvider = StateProvider<bool>((ref) => false);
+// ✅ Фаза 1b: выделенный текстовый блок (null = выделен видео-клип)
+final selectedTextIndexProvider = StateProvider<int?>((ref) => null);
 
 class ProjectNotifier extends StateNotifier<VideoProject> {
   final Ref _ref;
@@ -148,6 +150,12 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     if (ph > total) {
       _ref.read(playheadMsProvider.notifier).state = total.toDouble();
     }
+    // ✅ защищаем индекс текста после отката
+    final tCur = _ref.read(selectedTextIndexProvider);
+    if (tCur != null && tCur >= state.texts.length) {
+      _ref.read(selectedTextIndexProvider.notifier).state =
+          state.texts.isEmpty ? null : state.texts.length - 1;
+    }
   }
 
   // ==========================================
@@ -158,6 +166,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _commitHistory();
     state = project;
     _ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+    _ref.read(selectedTextIndexProvider.notifier).state = null;
     _ref.read(playheadMsProvider.notifier).state = 0.0;
     _ref.read(isPlayingProvider.notifier).state = false;
   }
@@ -168,6 +177,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _commitHistory();
     state = VideoProject(id: const Uuid().v4(), name: 'Новый проект', photos: [], texts: []);
     _ref.read(selectedPhotoIndexProvider.notifier).state = 0;
+    _ref.read(selectedTextIndexProvider.notifier).state = null;
     _ref.read(playheadMsProvider.notifier).state = 0.0;
     _ref.read(isPlayingProvider.notifier).state = false;
   }
@@ -419,6 +429,45 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   }
 
   // ==========================================
+  // ✅ Фаза 1b: перемещение клипа и дубль текста
+  // ==========================================
+
+  /// Переместить клип из from в to (без ReorderableListView-конвенции).
+  void movePhoto(int from, int to) {
+    if (from == to) return;
+    if (from < 0 || from >= state.photos.length) return;
+    _commitHistory();
+    final list = List<PhotoLayer>.from(state.photos);
+    final item = list.removeAt(from);
+    final target = to.clamp(0, list.length);
+    list.insert(target, item);
+    state = state.copyWith(photos: list);
+    _ref.read(selectedPhotoIndexProvider.notifier).state = target;
+    _ref.read(selectedTextIndexProvider.notifier).state = null;
+  }
+
+  /// Дублировать текстовый блок сразу после оригинала.
+  void duplicateText(int index) {
+    if (index < 0 || index >= state.texts.length) return;
+    _commitHistory();
+    final t = state.texts[index];
+    final dur = t.endTimeMilliseconds - t.startTimeMilliseconds;
+    final copy = TextLayer(
+      text: t.text,
+      fontFamily: t.fontFamily,
+      fontSize: t.fontSize,
+      colorValue: t.colorValue,
+      startTimeMilliseconds: t.endTimeMilliseconds,
+      endTimeMilliseconds: t.endTimeMilliseconds + dur,
+      animation: t.animation,
+      positionX: t.positionX,
+      positionY: t.positionY,
+    );
+    state = state.copyWith(texts: [...state.texts, copy]);
+    _ref.read(selectedTextIndexProvider.notifier).state = state.texts.length;
+  }
+
+  // ==========================================
   // Текст
   // ==========================================
 
@@ -440,6 +489,15 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _commitHistory();
     final newTexts = List<TextLayer>.from(state.texts)..removeAt(index);
     state = state.copyWith(texts: newTexts);
+    // ✅ сбрасываем выделение текста, если удалили выделенный
+    final tCur = _ref.read(selectedTextIndexProvider);
+    if (tCur != null) {
+      if (newTexts.isEmpty) {
+        _ref.read(selectedTextIndexProvider.notifier).state = null;
+      } else if (tCur >= newTexts.length) {
+        _ref.read(selectedTextIndexProvider.notifier).state = newTexts.length - 1;
+      }
+    }
   }
 
   // ==========================================

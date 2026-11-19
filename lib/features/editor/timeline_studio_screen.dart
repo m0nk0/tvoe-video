@@ -23,10 +23,11 @@ import 'sheets/transitions_sheet.dart';
 import 'text_tools.dart' hide frameStartMs;
 
 // ==========================================
-// 🎬 Timeline Studio v3.2 (Фаза 1a + адаптив v2)
-// ✅ дорожки гарантированно влезают в доступную высоту
-// ✅ ландшафт: зум в одной строке с транспортом (больше места дорожкам)
-// ✅ undo/redo, панель добавления, контекст-бар, split/dup/delete, покадрово
+// 🎬 Timeline Studio v4.1 (Фаза 1b, double-safe)
+// ✅ reorder-drag клипов (long-press)
+// ✅ иконки переходов: tap = лист, drag = длительность
+// ✅ аудио-блок: drag = offset (startTime)
+// ✅ текст: resize краями, tap = выделение, контекст-бар текста
 // ==========================================
 class TimelineStudioScreen extends ConsumerStatefulWidget {
   const TimelineStudioScreen({super.key});
@@ -160,8 +161,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   void _stepFrame(int dir) {
     final photos = ref.read(currentProjectProvider).photos;
     final total = photos.fold<int>(0, (s, p) => s + p.durationMilliseconds).toDouble();
-    final next = (ref.read(playheadMsProvider) + dir * _frameMs).clamp(0.0, total);
-    ref.read(playheadMsProvider.notifier).state = next.toDouble();
+    final next = (ref.read(playheadMsProvider) + dir * _frameMs).clamp(0.0, total).toDouble();
+    ref.read(playheadMsProvider.notifier).state = next;
   }
 
   @override
@@ -171,6 +172,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     final texts = project.texts;
     final starts = _frameStarts(photos);
     final selectedIndex = ref.watch(selectedPhotoIndexProvider);
+    final selectedText = ref.watch(selectedTextIndexProvider);
     final playheadMs = ref.watch(playheadMsProvider);
     final isPlaying = ref.watch(isPlayingProvider);
     final notifier = ref.read(currentProjectProvider.notifier);
@@ -190,6 +192,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     final contentWidth = _padLeft + totalMs * _pxPerMs + 160;
     final scrollOffset = _scroll.hasClients ? _scroll.offset : 0.0;
     final playheadX = _padLeft + playheadMs * _pxPerMs - scrollOffset;
+
+    final textMode = selectedText != null && selectedText < texts.length;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -262,13 +266,12 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
                 : LayoutBuilder(
                     builder: (context, constraints) {
-                      // ✅ Гарантия: блок дорожек всегда <= доступной высоты
-                      final scale = ((constraints.maxHeight - 2) / (_baseTracksH - 2)).clamp(0.30, 1.0);
-                      final vH = _videoH * scale;
-                      final aH = _audioH * scale;
-                      final tH = _textH * scale;
-                      final tracksH = vH + aH + tH + 2;
-                      final topOffset = ((constraints.maxHeight - tracksH) / 2).clamp(0.0, constraints.maxHeight);
+                      final double scale = (((constraints.maxHeight - 2) / (_baseTracksH - 2)).clamp(0.30, 1.0)).toDouble();
+                      final double vH = _videoH * scale;
+                      final double aH = _audioH * scale;
+                      final double tH = _textH * scale;
+                      final double tracksH = vH + aH + tH + 2;
+                      final double topOffset = (((constraints.maxHeight - tracksH) / 2).clamp(0.0, constraints.maxHeight)).toDouble();
 
                       return Stack(
                         children: [
@@ -321,8 +324,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                             left: playheadX - 12,
                             child: _PlayheadHandle(
                               onDrag: (dx) {
-                                final next = (playheadMs + dx / _pxPerMs).clamp(0.0, totalMs);
-                                ref.read(playheadMsProvider.notifier).state = next.toDouble();
+                                final next = (playheadMs + dx / _pxPerMs).clamp(0.0, totalMs).toDouble();
+                                ref.read(playheadMsProvider.notifier).state = next;
                               },
                             ),
                           ),
@@ -348,33 +351,45 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                     },
                   ),
           ),
-          if (photos.isNotEmpty)
+          if (textMode || photos.isNotEmpty)
             Container(
               color: AppColors.surface,
               height: isLandscape ? 40 : 46,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                children: [
-                  _CtxChip(icon: Icons.tune, label: 'Настройки', onTap: () => showPhotoSettingsSheet(context, ref, selectedIndex)),
-                  _CtxChip(icon: Icons.palette_outlined, label: 'Фильтр', onTap: () => showEffectsSheet(context, ref, [selectedIndex])),
-                  _CtxChip(icon: Icons.swap_horiz, label: 'Переход', onTap: () => showTransitionsSheet(context, ref, [selectedIndex])),
-                  _CtxChip(icon: Icons.motion_photos_on, label: 'Движение', onTap: () => showLiveMotionSheet(context, ref)),
-                  _CtxChip(icon: Icons.layers_outlined, label: 'Оверлей', onTap: () => showFrameOverlayPicker(context, ref, [selectedIndex], () {})),
-                  _CtxChip(icon: Icons.crop, label: 'Кроп', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CropEditorScreen(photoIndex: selectedIndex)))),
-                  _CtxChip(icon: Icons.content_copy, label: 'Дубль', onTap: () {
-                    ref.read(currentProjectProvider.notifier).duplicatePhoto(selectedIndex);
-                    HapticFeedback.lightImpact();
-                  }),
-                  _CtxChip(icon: Icons.content_cut, label: 'Разделить', onTap: _splitAtPlayhead),
-                  _CtxChip(icon: Icons.delete_outline, label: 'Удалить', danger: true, onTap: () {
-                    ref.read(currentProjectProvider.notifier).removePhoto(selectedIndex);
-                    HapticFeedback.lightImpact();
-                  }),
-                ],
+                children: textMode
+                    ? [
+                        _CtxChip(icon: Icons.edit_outlined, label: 'Редактор', onTap: () => showTextManagerSheet(context, ref)),
+                        _CtxChip(icon: Icons.content_copy, label: 'Дубль', onTap: () {
+                          ref.read(currentProjectProvider.notifier).duplicateText(selectedText!);
+                          HapticFeedback.lightImpact();
+                        }),
+                        _CtxChip(icon: Icons.delete_outline, label: 'Удалить', danger: true, onTap: () {
+                          ref.read(currentProjectProvider.notifier).removeText(selectedText!);
+                          ref.read(selectedTextIndexProvider.notifier).state = null;
+                          HapticFeedback.lightImpact();
+                        }),
+                      ]
+                    : [
+                        _CtxChip(icon: Icons.tune, label: 'Настройки', onTap: () => showPhotoSettingsSheet(context, ref, selectedIndex)),
+                        _CtxChip(icon: Icons.palette_outlined, label: 'Фильтр', onTap: () => showEffectsSheet(context, ref, [selectedIndex])),
+                        _CtxChip(icon: Icons.swap_horiz, label: 'Переход', onTap: () => showTransitionsSheet(context, ref, [selectedIndex])),
+                        _CtxChip(icon: Icons.motion_photos_on, label: 'Движение', onTap: () => showLiveMotionSheet(context, ref)),
+                        _CtxChip(icon: Icons.layers_outlined, label: 'Оверлей', onTap: () => showFrameOverlayPicker(context, ref, [selectedIndex], () {})),
+                        _CtxChip(icon: Icons.crop, label: 'Кроп', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CropEditorScreen(photoIndex: selectedIndex)))),
+                        _CtxChip(icon: Icons.content_copy, label: 'Дубль', onTap: () {
+                          ref.read(currentProjectProvider.notifier).duplicatePhoto(selectedIndex);
+                          HapticFeedback.lightImpact();
+                        }),
+                        _CtxChip(icon: Icons.content_cut, label: 'Разделить', onTap: _splitAtPlayhead),
+                        _CtxChip(icon: Icons.delete_outline, label: 'Удалить', danger: true, onTap: () {
+                          ref.read(currentProjectProvider.notifier).removePhoto(selectedIndex);
+                          HapticFeedback.lightImpact();
+                        }),
+                      ],
               ),
             ),
-          // ✅ Нижняя панель: ландшафт = одна строка (транспорт + зум), портрет = две
           Container(
             color: AppColors.surface,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -481,6 +496,9 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
+  // ==========================================
+  // Видео-дорожка: reorder-drag + иконки переходов
+  // ==========================================
   Widget _buildVideoTrack(List<PhotoLayer> photos, List<double> starts, double h) {
     return SizedBox(
       height: h,
@@ -489,24 +507,51 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
           for (int i = 0; i < photos.length; i++)
             Positioned(
               left: _padLeft + starts[i] * _pxPerMs,
-              width: math.max(8, photos[i].durationMilliseconds * _pxPerMs - 2),
+              width: math.max(8.0, photos[i].durationMilliseconds * _pxPerMs - 2),
               top: 6, bottom: 6,
-              child: _VideoBlock(
-                photo: photos[i],
-                isSelected: i == ref.watch(selectedPhotoIndexProvider),
-                pxPerMs: _pxPerMs,
-                onTap: () => ref.read(selectedPhotoIndexProvider.notifier).state = i,
-                onResizeStart: () => ref.read(currentProjectProvider.notifier).beginBatch(),
-                onResize: (deltaMs) {
-                  final start = starts[i];
-                  double newDur = photos[i].durationMilliseconds + deltaMs;
-                  final boundary = start + newDur;
-                  final snapped = _snapToBeat(boundary, 12 / _pxPerMs);
-                  if ((snapped - boundary).abs() > 0.01) newDur = snapped - start;
-                  newDur = newDur.clamp(300.0, 10000.0).toDouble();
-                  ref.read(currentProjectProvider.notifier).updatePhotoDuration(i, newDur.round());
+              child: LongPressDraggable<int>(
+                data: i,
+                feedback: Material(
+                  elevation: 6,
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(
+                    width: math.max(40.0, photos[i].durationMilliseconds * _pxPerMs - 2),
+                    height: h - 12,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.file(File(photos[i].imagePath), fit: BoxFit.cover),
+                    ),
+                  ),
+                ),
+                childWhenDragging: Opacity(
+                  opacity: 0.3,
+                  child: _videoBlock(photos, i, h, false),
+                ),
+                child: DragTarget<int>(
+                  onWillAccept: (from) => from != null && from != i,
+                  onAccept: (from) {
+                    ref.read(currentProjectProvider.notifier).movePhoto(from, i);
+                    HapticFeedback.mediumImpact();
+                  },
+                  builder: (ctx, cand, rej) => _videoBlock(photos, i, h, cand.isNotEmpty),
+                ),
+              ),
+            ),
+          for (int i = 1; i < photos.length; i++)
+            Positioned(
+              left: _padLeft + starts[i] * _pxPerMs - 11,
+              top: (h / 2) - 11,
+              width: 22, height: 22,
+              child: _TransitionHandle(
+                active: photos[i].transition != TransitionType.none,
+                onTap: () => showTransitionsSheet(context, ref, [i]),
+                onDragStart: () => ref.read(currentProjectProvider.notifier).beginBatch(),
+                onDrag: (dx) {
+                  final cur = photos[i].transitionDurationMs;
+                  final next = (cur + dx / _pxPerMs).round().clamp(300, 1500);
+                  ref.read(currentProjectProvider.notifier).updatePhotoTransitionDuration(i, next);
                 },
-                onResizeEnd: () => ref.read(currentProjectProvider.notifier).endBatch(),
+                onDragEnd: () => ref.read(currentProjectProvider.notifier).endBatch(),
               ),
             ),
         ],
@@ -514,22 +559,60 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
+  Widget _videoBlock(List<PhotoLayer> photos, int i, double h, bool dropHighlight) {
+    return _VideoBlock(
+      photo: photos[i],
+      isSelected: i == ref.watch(selectedPhotoIndexProvider),
+      dropHighlight: dropHighlight,
+      pxPerMs: _pxPerMs,
+      onTap: () {
+        ref.read(selectedPhotoIndexProvider.notifier).state = i;
+        ref.read(selectedTextIndexProvider.notifier).state = null;
+      },
+      onResizeStart: () => ref.read(currentProjectProvider.notifier).beginBatch(),
+      onResize: (deltaMs) {
+        final starts = _frameStarts(photos);
+        final start = starts[i];
+        double newDur = photos[i].durationMilliseconds + deltaMs;
+        final boundary = start + newDur;
+        final snapped = _snapToBeat(boundary, 12 / _pxPerMs);
+        if ((snapped - boundary).abs() > 0.01) newDur = snapped - start;
+        newDur = newDur.clamp(300.0, 10000.0).toDouble();
+        ref.read(currentProjectProvider.notifier).updatePhotoDuration(i, newDur.round());
+      },
+      onResizeEnd: () => ref.read(currentProjectProvider.notifier).endBatch(),
+    );
+  }
+
+  // ==========================================
+  // Аудио-дорожка: drag = offset
+  // ==========================================
   Widget _buildAudioTrack(double totalVideo, double audioVisibleMs, double h) {
     final track = ref.watch(currentProjectProvider).audioTrack;
     final wave = _visibleWave(audioVisibleMs);
-    final trackWidth = totalVideo * _pxPerMs;
-    final pad = (h * 0.07).clamp(2.0, 6.0);
+    final offsetMs = _audioOffsetMs;
+    final double blockLeft = _padLeft + offsetMs * _pxPerMs;
+    final double blockWidth = math.max(8.0, (totalVideo - offsetMs) * _pxPerMs);
+    final double pad = ((h * 0.07).clamp(2.0, 6.0)).toDouble();
     final compact = h < 50;
 
     return SizedBox(
       height: h,
       child: GestureDetector(
         onTap: () => showMusicSourcePicker(context, ref),
+        onHorizontalDragStart: (_) => ref.read(currentProjectProvider.notifier).beginBatch(),
+        onHorizontalDragUpdate: (d) {
+          if (track == null) return;
+          final cur = ref.read(currentProjectProvider).audioTrack?.startTime ?? 0;
+          final next = (cur + (d.delta.dx / _pxPerMs) / 1000).clamp(0.0, totalVideo / 1000).toDouble();
+          ref.read(currentProjectProvider.notifier).updateAudioStartTime(next);
+        },
+        onHorizontalDragEnd: (_) => ref.read(currentProjectProvider.notifier).endBatch(),
         child: Stack(
           children: [
             Positioned(
-              left: _padLeft,
-              width: trackWidth > 8 ? trackWidth : 8,
+              left: blockLeft,
+              width: blockWidth,
               top: pad, bottom: pad,
               child: Container(
                 decoration: BoxDecoration(
@@ -559,9 +642,12 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                                     fontWeight: FontWeight.w600,
                                     color: track != null ? AppColors.textPrimary : AppColors.textMuted),
                                 maxLines: 1, overflow: TextOverflow.ellipsis),
-                              if (track != null && audioVisibleMs > 0 && !compact)
-                                Text('${(audioVisibleMs / 1000).toStringAsFixed(1)}s • Громкость ${(track.volume * 100).round()}%',
-                                  style: GoogleFonts.manrope(fontSize: 10, color: AppColors.textMuted)),
+                              if (track != null && !compact)
+                                Text(
+                                  '${(audioVisibleMs / 1000).toStringAsFixed(1)}s • Громкость ${(track.volume * 100).round()}%'
+                                  '${offsetMs > 0 ? ' • старт +${(offsetMs / 1000).toStringAsFixed(1)}s' : ''}',
+                                  style: GoogleFonts.manrope(fontSize: 10, color: AppColors.textMuted),
+                                ),
                             ],
                           ),
                         ),
@@ -574,7 +660,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
             ),
             if (wave.isNotEmpty)
               Positioned(
-                left: _padLeft + _audioOffsetMs * _pxPerMs,
+                left: blockLeft,
                 width: audioVisibleMs * _pxPerMs,
                 top: 0, bottom: 0,
                 child: IgnorePointer(
@@ -608,6 +694,9 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
+  // ==========================================
+  // Текстовая дорожка: resize краями + tap-выделение
+  // ==========================================
   Widget _buildTextTrack(List<TextLayer> texts, double h) {
     if (texts.isEmpty) {
       return SizedBox(
@@ -615,7 +704,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
         child: Center(child: Text('Текста нет', style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted))),
       );
     }
-    final pad = (h * 0.17).clamp(2.0, 8.0);
+    final double pad = ((h * 0.17).clamp(2.0, 8.0)).toDouble();
+    final selectedText = ref.watch(selectedTextIndexProvider);
     return SizedBox(
       height: h,
       child: Stack(
@@ -623,25 +713,37 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
           for (int i = 0; i < texts.length; i++)
             Positioned(
               left: _padLeft + texts[i].startTimeMilliseconds * _pxPerMs,
-              width: math.max(12, (texts[i].endTimeMilliseconds - texts[i].startTimeMilliseconds) * _pxPerMs - 2),
+              width: math.max(24.0, (texts[i].endTimeMilliseconds - texts[i].startTimeMilliseconds) * _pxPerMs - 2),
               top: pad, bottom: pad,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: _TextBlock(
-                  label: texts[i].text,
-                  onMoveStart: () => ref.read(currentProjectProvider.notifier).beginBatch(),
-                  onMove: (deltaMs) {
-                    final clone = _cloneText(texts[i]);
-                    final dur = clone.endTimeMilliseconds - clone.startTimeMilliseconds;
-                    int newStart = (clone.startTimeMilliseconds + deltaMs).round();
-                    newStart = newStart.clamp(0, 1000000);
-                    clone.startTimeMilliseconds = newStart;
-                    clone.endTimeMilliseconds = newStart + dur;
-                    ref.read(currentProjectProvider.notifier).updateText(i, clone);
-                  },
-                  onMoveEnd: () => ref.read(currentProjectProvider.notifier).endBatch(),
-                ),
+              child: _TextBlock(
+                label: texts[i].text,
+                isSelected: selectedText == i,
+                onTap: () => ref.read(selectedTextIndexProvider.notifier).state = i,
+                onMoveStart: () => ref.read(currentProjectProvider.notifier).beginBatch(),
+                onMove: (deltaMs) {
+                  final clone = _cloneText(texts[i]);
+                  final dur = clone.endTimeMilliseconds - clone.startTimeMilliseconds;
+                  int newStart = (clone.startTimeMilliseconds + deltaMs).round();
+                  newStart = newStart.clamp(0, 1000000);
+                  clone.startTimeMilliseconds = newStart;
+                  clone.endTimeMilliseconds = newStart + dur;
+                  ref.read(currentProjectProvider.notifier).updateText(i, clone);
+                },
+                onMoveEnd: () => ref.read(currentProjectProvider.notifier).endBatch(),
+                onResizeStart: () => ref.read(currentProjectProvider.notifier).beginBatch(),
+                onResizeLeft: (deltaMs) {
+                  final clone = _cloneText(texts[i]);
+                  final newStart = (clone.startTimeMilliseconds + deltaMs).round().clamp(0, clone.endTimeMilliseconds - 200);
+                  clone.startTimeMilliseconds = newStart;
+                  ref.read(currentProjectProvider.notifier).updateText(i, clone);
+                },
+                onResizeRight: (deltaMs) {
+                  final clone = _cloneText(texts[i]);
+                  final newEnd = (clone.endTimeMilliseconds + deltaMs).round().clamp(clone.startTimeMilliseconds + 200, 1000000);
+                  clone.endTimeMilliseconds = newEnd;
+                  ref.read(currentProjectProvider.notifier).updateText(i, clone);
+                },
+                onResizeEnd: () => ref.read(currentProjectProvider.notifier).endBatch(),
               ),
             ),
         ],
@@ -740,9 +842,37 @@ class _TransportButton extends StatelessWidget {
   }
 }
 
+class _TransitionHandle extends StatelessWidget {
+  final bool active;
+  final VoidCallback onTap;
+  final VoidCallback onDragStart;
+  final ValueChanged<double> onDrag;
+  final VoidCallback onDragEnd;
+  const _TransitionHandle({required this.active, required this.onTap, required this.onDragStart, required this.onDrag, required this.onDragEnd});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      onHorizontalDragStart: (_) => onDragStart(),
+      onHorizontalDragUpdate: (d) => onDrag(d.delta.dx),
+      onHorizontalDragEnd: (_) => onDragEnd(),
+      child: Container(
+        decoration: BoxDecoration(
+          color: active ? AppColors.primary : AppColors.surfaceLight,
+          shape: BoxShape.circle,
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.6), width: 1.5),
+        ),
+        child: Icon(Icons.swap_horiz, size: 13, color: active ? Colors.white : AppColors.textMuted),
+      ),
+    );
+  }
+}
+
 class _VideoBlock extends StatefulWidget {
   final PhotoLayer photo;
   final bool isSelected;
+  final bool dropHighlight;
   final double pxPerMs;
   final VoidCallback onTap;
   final VoidCallback onResizeStart;
@@ -752,6 +882,7 @@ class _VideoBlock extends StatefulWidget {
   const _VideoBlock({
     required this.photo, required this.isSelected, required this.pxPerMs,
     required this.onTap, required this.onResizeStart, required this.onResize, required this.onResizeEnd,
+    this.dropHighlight = false,
   });
 
   @override
@@ -767,7 +898,10 @@ class _VideoBlockState extends State<_VideoBlock> {
         decoration: BoxDecoration(
           color: AppColors.surfaceLight,
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: widget.isSelected ? AppColors.primary : Colors.transparent, width: 2),
+          border: Border.all(
+            color: widget.dropHighlight ? AppColors.aiAccent : (widget.isSelected ? AppColors.primary : Colors.transparent),
+            width: 2,
+          ),
         ),
         child: Stack(
           children: [
@@ -823,10 +957,22 @@ class _BeatMarkerState extends State<_BeatMarker> {
 
 class _TextBlock extends StatefulWidget {
   final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
   final VoidCallback onMoveStart;
   final ValueChanged<double> onMove;
   final VoidCallback onMoveEnd;
-  const _TextBlock({required this.label, required this.onMoveStart, required this.onMove, required this.onMoveEnd});
+  final VoidCallback onResizeStart;
+  final ValueChanged<double> onResizeLeft;
+  final ValueChanged<double> onResizeRight;
+  final VoidCallback onResizeEnd;
+
+  const _TextBlock({
+    required this.label, required this.onTap,
+    required this.onMoveStart, required this.onMove, required this.onMoveEnd,
+    required this.onResizeStart, required this.onResizeLeft, required this.onResizeRight, required this.onResizeEnd,
+    this.isSelected = false,
+  });
 
   @override
   State<_TextBlock> createState() => _TextBlockState();
@@ -836,20 +982,45 @@ class _TextBlockState extends State<_TextBlock> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      onTap: widget.onTap,
       onHorizontalDragStart: (_) => widget.onMoveStart(),
       onHorizontalDragUpdate: (d) => widget.onMove(d.delta.dx),
       onHorizontalDragEnd: (_) => widget.onMoveEnd(),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
-          color: AppColors.primary.withOpacity(0.25),
+          color: AppColors.primary.withOpacity(widget.isSelected ? 0.4 : 0.25),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: AppColors.primary.withOpacity(0.6)),
+          border: Border.all(color: widget.isSelected ? AppColors.primary : AppColors.primary.withOpacity(0.6), width: widget.isSelected ? 2 : 1),
         ),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textPrimary)),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              left: 8, right: 8,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textPrimary)),
+              ),
+            ),
+            Positioned(
+              left: 0, top: 0, bottom: 0, width: 8,
+              child: GestureDetector(
+                onHorizontalDragStart: (_) => widget.onResizeStart(),
+                onHorizontalDragUpdate: (d) => widget.onResizeLeft(d.delta.dx),
+                onHorizontalDragEnd: (_) => widget.onResizeEnd(),
+                child: Container(color: AppColors.primary.withOpacity(0.5)),
+              ),
+            ),
+            Positioned(
+              right: 0, top: 0, bottom: 0, width: 8,
+              child: GestureDetector(
+                onHorizontalDragStart: (_) => widget.onResizeStart(),
+                onHorizontalDragUpdate: (d) => widget.onResizeRight(d.delta.dx),
+                onHorizontalDragEnd: (_) => widget.onResizeEnd(),
+                child: Container(color: AppColors.primary.withOpacity(0.5)),
+              ),
+            ),
+          ],
         ),
       ),
     );
