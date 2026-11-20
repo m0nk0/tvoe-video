@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'core/theme/app_theme.dart';
+import 'core/theme/colors.dart';
 import 'data/models/audio_track.dart';
 import 'data/models/photo_layer.dart';
 import 'data/models/template.dart';
@@ -18,6 +19,7 @@ import 'data/providers/projects_provider.dart';
 import 'data/providers/media_storage_provider.dart'; // ✅ провайдер mediaStorageProvider
 import 'data/repositories/project_repository.dart';
 import 'features/home/home_screen.dart';
+import 'features/onboarding/onboarding_screen.dart'; // ✅ онбординг first-run
 import 'data/services/media_storage_service.dart';
 import 'data/services/bundled_music_service.dart';
 
@@ -193,7 +195,63 @@ class MyApp extends StatelessWidget {
       title: 'Твоё Видео',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
-      home: const HomeScreen(),
+      home: const _OnboardingGate(),
+    );
+  }
+}
+
+// ==========================================
+// ✅ Онбординг-гейт: показывает 3 шага один раз
+// (флаг onboardingSeen в SharedPreferences)
+// ==========================================
+class _OnboardingGate extends StatefulWidget {
+  const _OnboardingGate();
+
+  @override
+  State<_OnboardingGate> createState() => _OnboardingGateState();
+}
+
+class _OnboardingGateState extends State<_OnboardingGate> {
+  Future<bool>? _seen;
+
+  @override
+  void initState() {
+    super.initState();
+    _seen = _load();
+  }
+
+  Future<bool> _load() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool('onboardingSeen') ?? false;
+  }
+
+    Future<void> _markSeen() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('onboardingSeen', true);
+    if (mounted) {
+      setState(() {
+        _seen = Future.value(true);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _seen,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+                   return Scaffold(
+            backgroundColor: AppColors.background,
+            body: Center(
+              child: CircularProgressIndicator(color: AppColors.primary),
+            ),
+          );
+        }
+        return (snap.data ?? false)
+            ? const HomeScreen()
+            : OnboardingScreen(onDone: _markSeen);
+      },
     );
   }
 }

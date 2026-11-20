@@ -1,12 +1,14 @@
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kReleaseMode;
 
 // ==========================================
 // Детектор битов через нативный MediaCodec (без FFmpeg)
 // ✅ Кэш + waveform + октавная нормализация BPM + отладка
 // ==========================================
 
-const bool kBeatDebug = true;
+/// Логи бит-детектора только в debug-сборках
+const bool kBeatDebug = !kReleaseMode;
 
 class BeatAnalysis {
   final List<double> beats;

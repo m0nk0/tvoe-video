@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
@@ -30,6 +29,9 @@ class _ExportScreenState extends State<ExportScreen> {
   String? _warningMessage;
   bool _hasAudio = false;
   bool _gifActive = false;
+  // ✅ Hardening: пресеты качества и fps
+  ExportQuality _quality = ExportQuality.medium;
+  int _fps = 30;
   VideoFormat _selectedFormat = VideoFormat.formats[0];
   final TextEditingController _fileNameController = TextEditingController();
 
@@ -55,6 +57,9 @@ class _ExportScreenState extends State<ExportScreen> {
     return clean.isEmpty ? 'Мой клип' : clean;
   }
 
+  // ==========================================
+  // ✅ Экспорт MP4 с пресетами качества и fps
+  // ==========================================
   Future<void> _startExport() async {
     final fileName = _sanitizeFileName(_fileNameController.text);
     setState(() {
@@ -76,6 +81,8 @@ class _ExportScreenState extends State<ExportScreen> {
           if (mounted) setState(() => _progress = p);
         },
         cancelChecker: () => !_isExporting,
+        quality: _quality,
+        fps: _fps,
       );
 
       if (!mounted) return;
@@ -107,7 +114,7 @@ class _ExportScreenState extends State<ExportScreen> {
   }
 
   // ==========================================
-  // ✅ GIF-экспорт: весь клип сжимается в ≤10 с (ускорение), все кадры входят
+  // ✅ GIF-экспорт: весь клип сжимается в ≤10 с (ускорение)
   // ==========================================
   Future<void> _startGifExport() async {
     final fileName = _sanitizeFileName(_fileNameController.text);
@@ -168,6 +175,7 @@ class _ExportScreenState extends State<ExportScreen> {
     if (_outputPath == null) return;
     setState(() => _isExporting = true);
     try {
+      // ✅ GIF сохраняем как изображение, видео — как видео
       if (_outputPath!.endsWith('.gif')) {
         await Gal.putImage(_outputPath!, album: 'Твоё Видео');
       } else {
@@ -194,6 +202,7 @@ class _ExportScreenState extends State<ExportScreen> {
     }
   }
 
+  // ✅ Inline-копирование в папку clips/ приложения
   Future<void> _saveToMediaLibrary() async {
     if (_outputPath == null) return;
     setState(() => _isExporting = true);
@@ -226,6 +235,7 @@ class _ExportScreenState extends State<ExportScreen> {
     }
   }
 
+  // ✅ share_plus 7.x–10.x совместимо
   Future<void> _shareVideo() async {
     if (_outputPath == null) return;
     try {
@@ -443,8 +453,68 @@ class _ExportScreenState extends State<ExportScreen> {
             ),
           ),
         ),
+        // ✅ Hardening: пресет качества
+        const SizedBox(height: 12),
+        Row(
+          children: ExportQuality.values.map((q) {
+            final active = _quality == q;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _quality = q),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: active ? AppColors.primary : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: AppColors.primary.withOpacity(active ? 0.6 : 0.2)),
+                  ),
+                  child: Text(
+                    q.label,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: active ? Colors.white : AppColors.textSecondary),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        // ✅ Hardening: выбор fps
+        const SizedBox(height: 10),
+        Row(
+          children: [24, 30].map((f) {
+            final active = _fps == f;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _fps = f),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? AppColors.primary.withOpacity(0.15)
+                        : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: active ? AppColors.primary : Colors.transparent),
+                  ),
+                  child: Text(
+                    '$f fps',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.jetBrainsMono(
+                        fontSize: 12,
+                        color: active ? AppColors.primary : AppColors.textMuted),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
         const SizedBox(height: 20),
-        // ✅ Во всю ширину, шрифт 15 — текст не вылезает
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
@@ -550,11 +620,16 @@ class _ExportScreenState extends State<ExportScreen> {
               textAlign: TextAlign.center,
             ),
           ],
-          if (_warningMessage != null) ...[
-            const SizedBox(height: 6),
+                   if (_warningMessage != null) ...[
+            const SizedBox(height: 8),
             Text(
               '⚠️ ${_warningMessage!}',
-              style: GoogleFonts.manrope(fontSize: 11, color: Colors.orange),
+              style: GoogleFonts.manrope(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: Colors.orange,
+                height: 1.4,
+              ),
               textAlign: TextAlign.center,
             ),
           ],
@@ -621,7 +696,7 @@ class _ExportScreenState extends State<ExportScreen> {
         Text(
           _gifActive
               ? 'Экспорт: GIF (480 px, 10 fps, без звука)'
-              : 'Экспорт: ${_selectedFormat.name} (${_selectedFormat.width}×${_selectedFormat.height})',
+              : 'Экспорт: ${_selectedFormat.name} • ${_quality.label} • $_fps fps',
           style: GoogleFonts.manrope(
             fontSize: 16,
             fontWeight: FontWeight.w600,

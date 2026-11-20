@@ -30,6 +30,35 @@ class ExportResult {
   });
 }
 
+// ==========================================
+// ✅ Hardening: пресеты качества экспорта
+// ==========================================
+enum ExportQuality { low, medium, high }
+
+extension ExportQualityX on ExportQuality {
+  double get multiplier {
+    switch (this) {
+      case ExportQuality.low:
+        return 0.6;
+      case ExportQuality.medium:
+        return 1.0;
+      case ExportQuality.high:
+        return 1.6;
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case ExportQuality.low:
+        return 'Эконом';
+      case ExportQuality.medium:
+        return 'Стандарт';
+      case ExportQuality.high:
+        return 'Высокое';
+    }
+  }
+}
+
 /// Сервис экспорта проекта в MP4 видео / GIF.
 /// Видео кодируется нативным Android MediaCodec, звук — MediaExtractor + AAC + MediaMuxer.
 /// Никаких сторонних плагинов для рендера.
@@ -47,9 +76,10 @@ class ExportService {
   static final Map<String, ui.Image> _imageCache = {};
   static const int _maxCachedImages = 3;
 
-  static int _bitrateFor(int width, int height) {
-    final b = (width * height * _defaultFps * 0.12).round();
-    return b.clamp(2500000, 12000000);
+  // ✅ Hardening: битрейт зависит от fps и пресета качества
+  static int _bitrateFor(int width, int height, int fps, ExportQuality quality) {
+    final b = (width * height * fps * 0.12 * quality.multiplier).round();
+    return b.clamp(1500000, 20000000);
   }
 
   static void _clearImageCache() {
@@ -111,12 +141,17 @@ class ExportService {
     }
   }
 
+  // ==========================================
+  // ✅ Экспорт MP4: качество + fps настраиваемые
+  // ==========================================
   static Future<ExportResult?> exportVideo({
     required VideoProject project,
     VideoFormat? format,
     String? outputFileName,
     Function(double)? onProgress,
     bool Function()? cancelChecker,
+    ExportQuality quality = ExportQuality.medium,
+    int fps = 30,
   }) async {
     lastError = null;
 
@@ -147,6 +182,8 @@ class ExportService {
         outputPath: silentVideoPath,
         onProgress: (p) => onProgress?.call(p * 0.8),
         cancelChecker: cancelChecker,
+        fps: fps,
+        quality: quality,
       );
 
       if (silentResult == null) {
@@ -212,10 +249,12 @@ class ExportService {
     required String outputPath,
     required Function(double) onProgress,
     bool Function()? cancelChecker,
+    required int fps,
+    required ExportQuality quality,
   }) async {
     int totalFrames = 0;
     for (final photo in project.photos) {
-      totalFrames += (_defaultFps * photo.durationMilliseconds / 1000).ceil();
+      totalFrames += (fps * photo.durationMilliseconds / 1000).ceil();
     }
     if (totalFrames <= 0) {
       lastError = 'Нулевая длительность проекта';
@@ -227,8 +266,8 @@ class ExportService {
       await _channel.invokeMethod('start', {
         'width': width,
         'height': height,
-        'fps': _defaultFps,
-        'bitrate': _bitrateFor(width, height),
+        'fps': fps,
+        'bitrate': _bitrateFor(width, height, fps, quality),
         'path': outputPath,
       });
       started = true;
@@ -238,7 +277,7 @@ class ExportService {
       for (int segIndex = 0; segIndex < project.photos.length; segIndex++) {
         final photo = project.photos[segIndex];
         final framesForSegment =
-            (_defaultFps * photo.durationMilliseconds / 1000).ceil();
+            (fps * photo.durationMilliseconds / 1000).ceil();
         if (framesForSegment <= 0) continue;
 
         for (int frameIndex = 0; frameIndex < framesForSegment; frameIndex++) {
@@ -281,7 +320,8 @@ class ExportService {
         return null;
       }
 
-      print('✅ Нативный рендер завершён: $renderedFrames кадров, '
+      print('✅ Нативный рендер завершён: $renderedFrames кадров @${fps}fps '
+          '(${quality.label}), '
           '${(file.lengthSync() / 1024 / 1024).toStringAsFixed(2)} МБ');
       return outputPath;
     } catch (e) {
@@ -299,6 +339,7 @@ class ExportService {
 
   // ==========================================
   // ✅ ШАГ 2: нативное микширование звука
+  // MP3 → PCM (громкость/задержка/фейд/обрезка) → AAC → MediaMuxer
   // ==========================================
   static Future<bool> _mixWithAudio({
     required String videoPath,
@@ -417,6 +458,7 @@ class ExportService {
   }) async {
     final currentPhoto = project.photos[currentSegmentIndex];
 
+    // ✅ Кэш вместо декодирования JPEG на каждый кадр
     final uiImage = await _loadImage(currentPhoto.imagePath);
     if (uiImage == null) return;
 
@@ -436,6 +478,7 @@ class ExportService {
       offsetY: currentPhoto.offsetY,
     );
 
+    // 🎬 Ken Burns + Cinematic с интенсивностью
     final elapsedMsForMotion = frameProgress * currentPhoto.durationMilliseconds;
     final motionT = currentPhoto.durationMilliseconds > 0
         ? (elapsedMsForMotion / currentPhoto.durationMilliseconds).clamp(0.0, 1.0)
@@ -542,6 +585,9 @@ class ExportService {
       }
     }
 
+    // ==========================================
+    // Переход (фото рисуется в liveDst с учётом Ken Burns + Cinematic)
+    // ==========================================
     switch (currentPhoto.transition) {
       case TransitionType.none:
         canvas.drawImageRect(uiImage, srcRect, liveDst, photoPaint(1.0));
