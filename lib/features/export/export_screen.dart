@@ -32,6 +32,9 @@ class _ExportScreenState extends State<ExportScreen> {
   // ✅ Hardening: пресеты качества и fps
   ExportQuality _quality = ExportQuality.medium;
   int _fps = 30;
+  // ✅ Cover: выбранный кадр обложки и путь к PNG
+  int _coverIndex = 0;
+  String? _coverPath;
   VideoFormat _selectedFormat = VideoFormat.formats[0];
   final TextEditingController _fileNameController = TextEditingController();
 
@@ -58,7 +61,7 @@ class _ExportScreenState extends State<ExportScreen> {
   }
 
   // ==========================================
-  // ✅ Экспорт MP4 с пресетами качества и fps
+  // ✅ Экспорт MP4 с пресетами качества/fps + обложка
   // ==========================================
   Future<void> _startExport() async {
     final fileName = _sanitizeFileName(_fileNameController.text);
@@ -70,6 +73,7 @@ class _ExportScreenState extends State<ExportScreen> {
       _warningMessage = null;
       _outputPath = null;
       _savedClipPath = null;
+      _coverPath = null;
       _hasAudio = false;
     });
     try {
@@ -91,12 +95,26 @@ class _ExportScreenState extends State<ExportScreen> {
           File(result.videoPath).existsSync() &&
           File(result.videoPath).lengthSync() > 1024;
 
+      // ✅ Рендер обложки после успешного экспорта видео
+      String? coverPath;
+      if (ok) {
+        coverPath = await ExportService.exportCover(
+          project: widget.project,
+          photoIndex: _coverIndex,
+          format: _selectedFormat,
+          outputFileName: fileName,
+        );
+      }
+
+      if (!mounted) return;
+
       setState(() {
         _isExporting = false;
         if (ok) {
           _outputPath = result.videoPath;
           _hasAudio = result.hasAudio;
           _warningMessage = result.warning;
+          _coverPath = coverPath;
         } else {
           _outputPath = null;
           _errorMessage = ExportService.lastError ?? 'Видео не создано';
@@ -126,6 +144,7 @@ class _ExportScreenState extends State<ExportScreen> {
       _warningMessage = null;
       _outputPath = null;
       _savedClipPath = null;
+      _coverPath = null;
       _hasAudio = false;
     });
     try {
@@ -180,6 +199,12 @@ class _ExportScreenState extends State<ExportScreen> {
         await Gal.putImage(_outputPath!, album: 'Твоё Видео');
       } else {
         await Gal.putVideo(_outputPath!, album: 'Твоё Видео');
+      }
+      // ✅ Обложку тоже кладём в галерею
+      if (_coverPath != null) {
+        try {
+          await Gal.putImage(_coverPath!, album: 'Твоё Видео');
+        } catch (_) {}
       }
       setState(() {
         _savedClipPath = _outputPath;
@@ -514,6 +539,42 @@ class _ExportScreenState extends State<ExportScreen> {
             );
           }).toList(),
         ),
+        // ✅ Cover: плёнка выбора кадра обложки
+        const SizedBox(height: 14),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text('Обложка',
+              style: GoogleFonts.manrope(fontSize: 12, color: AppColors.textMuted)),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 64,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: widget.project.photos.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final active = _coverIndex == i;
+              return GestureDetector(
+                onTap: () => setState(() => _coverIndex = i),
+                child: Container(
+                  width: 48,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: active ? AppColors.primary : Colors.transparent,
+                        width: 2),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: Image.file(File(widget.project.photos[i].imagePath),
+                        fit: BoxFit.cover),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
         const SizedBox(height: 20),
         SizedBox(
           width: double.infinity,
@@ -590,13 +651,13 @@ class _ExportScreenState extends State<ExportScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
           Icon(
             isGif ? Icons.gif_box_outlined : Icons.check_circle,
-            size: 80,
+            size: 72,
             color: AppColors.primary,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Text(
             isGif ? 'GIF готов!' : 'Видео готово!',
             style: GoogleFonts.unbounded(
@@ -606,7 +667,7 @@ class _ExportScreenState extends State<ExportScreen> {
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             '${(File(_outputPath!).lengthSync() / 1024 / 1024).toStringAsFixed(1)} МБ',
             style: GoogleFonts.jetBrainsMono(fontSize: 16, color: AppColors.textSecondary),
@@ -620,7 +681,7 @@ class _ExportScreenState extends State<ExportScreen> {
               textAlign: TextAlign.center,
             ),
           ],
-                   if (_warningMessage != null) ...[
+          if (_warningMessage != null) ...[
             const SizedBox(height: 8),
             Text(
               '⚠️ ${_warningMessage!}',
@@ -630,6 +691,22 @@ class _ExportScreenState extends State<ExportScreen> {
                 color: Colors.orange,
                 height: 1.4,
               ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          // ✅ Превью обложки
+          if (_coverPath != null) ...[
+            const SizedBox(height: 12),
+            Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.file(File(_coverPath!), height: 120, fit: BoxFit.cover),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Обложка сохранена рядом с видео',
+              style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
               textAlign: TextAlign.center,
             ),
           ],
@@ -676,6 +753,7 @@ class _ExportScreenState extends State<ExportScreen> {
               _progress = 0.0;
               _warningMessage = null;
               _errorMessage = null;
+              _coverPath = null;
             }),
             child: Text(
               'Создать ещё',

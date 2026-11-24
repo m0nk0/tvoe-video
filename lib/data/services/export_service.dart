@@ -59,7 +59,7 @@ extension ExportQualityX on ExportQuality {
   }
 }
 
-/// Сервис экспорта проекта в MP4 видео / GIF.
+/// Сервис экспорта проекта в MP4 видео / GIF / PNG-обложку.
 /// Видео кодируется нативным Android MediaCodec, звук — MediaExtractor + AAC + MediaMuxer.
 /// Никаких сторонних плагинов для рендера.
 class ExportService {
@@ -1032,6 +1032,66 @@ class ExportService {
       return null;
     } finally {
       _clearImageCache();
+    }
+  }
+
+  // ==========================================
+  // ✅ Cover: рендер одного кадра в PNG (превью для галереи/шеринга)
+  // ==========================================
+  static Future<String?> exportCover({
+    required VideoProject project,
+    required int photoIndex,
+    VideoFormat? format,
+    String? outputFileName,
+  }) async {
+    lastError = null;
+    if (project.photos.isEmpty) {
+      lastError = 'В проекте нет кадров';
+      return null;
+    }
+    final idx = photoIndex.clamp(0, project.photos.length - 1);
+    final fmt = format ?? project.format;
+
+    final appDir = await getApplicationDocumentsDirectory();
+    final base = (outputFileName != null && outputFileName.trim().isNotEmpty)
+        ? _sanitizeFileName(outputFileName.trim())
+        : 'tvoe_cover_${DateTime.now().millisecondsSinceEpoch}';
+    final path = '${appDir.path}/${base}_cover.png';
+
+    try {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(
+          recorder, Rect.fromLTWH(0, 0, fmt.width.toDouble(), fmt.height.toDouble()));
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, fmt.width.toDouble(), fmt.height.toDouble()),
+        Paint()..color = Colors.black,
+      );
+      // кадр на середине движения: Ken Burns/Cinematic в лучшей фазе
+      await _paintPhotoWithTransition(
+        canvas,
+        project,
+        idx,
+        0.5,
+        width: fmt.width,
+        height: fmt.height,
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(fmt.width, fmt.height);
+      final data = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      picture.dispose();
+      if (data == null) {
+        lastError = 'Не удалось отрисовать обложку';
+        return null;
+      }
+      final file = File(path);
+      await file.writeAsBytes(data.buffer.asUint8List());
+      print('✅ Обложка: $path (${(file.lengthSync() / 1024).round()} КБ)');
+      return path;
+    } catch (e) {
+      print('❌ Ошибка обложки: $e');
+      lastError = 'Ошибка обложки: $e';
+      return null;
     }
   }
 
