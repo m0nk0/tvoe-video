@@ -4,7 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 export 'media_storage_provider.dart';
 import '../models/audio_track.dart';
-import '../models/keyframe.dart';         // ✅ Кейфреймы (под-срез 1)
+import '../models/keyframe.dart';
 import '../models/photo_layer.dart';
 import '../models/text_layer.dart';
 import '../models/video_project.dart';
@@ -22,6 +22,8 @@ final playheadMsProvider = StateProvider<double>((ref) => 0.0);
 final isPlayingProvider = StateProvider<bool>((ref) => false);
 // ✅ Фаза 1b: выделенный текстовый блок (null = выделен видео-клип)
 final selectedTextIndexProvider = StateProvider<int?>((ref) => null);
+// ✅ Под-срез 2: выделенный кейфрейм [photoIndex, kfIndex] или null
+final selectedKeyframeProvider = StateProvider<List<int>?>((ref) => null);
 
 class ProjectNotifier extends StateNotifier<VideoProject> {
   final Ref _ref;
@@ -31,14 +33,14 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   // ==========================================
   final List<VideoProject> _history = [];
   int _historyIndex = -1;
-  bool _pending = false; // текущее состояние ещё не в истории
-  String? _lastOp; // для склейки непрерывных изменений (слайдеры)
+  bool _pending = false;
+  String? _lastOp;
   int _lastOpTime = 0;
-  int _batchDepth = 0; // пакетные изменения (умный монтаж, бит-синк)
+  int _batchDepth = 0;
   bool _batchDirty = false;
 
-  static const int _maxHistory = 20; // максимум 20 шагов назад
-  static const int _coalesceMs = 800; // окно склейки для слайдеров
+  static const int _maxHistory = 20;
+  static const int _coalesceMs = 800;
 
   ProjectNotifier(this._ref)
       : super(VideoProject(
@@ -51,13 +53,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _historyIndex = 0;
   }
 
-  // ==========================================
-  // ✅ Внутренняя механика истории
-  // ==========================================
-
-  /// Отметить начало изменения.
-  /// [op] — имя непрерывной операции (слайдер); одинаковые [op]
-  /// в пределах окна склеиваются в ОДИН шаг истории.
   void _commitHistory({String? op}) {
     if (_batchDepth > 0) {
       _batchDirty = true;
@@ -75,7 +70,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _pending = true;
   }
 
-  /// Дописать текущее состояние в историю
   void _flushPending() {
     if (!_pending) return;
     _pending = false;
@@ -90,7 +84,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     }
   }
 
-  /// Начало пакетного изменения (умный монтаж, синхрон по битам)
   void beginBatch() {
     if (_batchDepth == 0) {
       _flushPending();
@@ -99,7 +92,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _batchDepth++;
   }
 
-  /// Конец пакетного изменения: всё пакетом = ОДИН шаг истории
   void endBatch() {
     if (_batchDepth > 0) _batchDepth--;
     if (_batchDepth == 0 && _batchDirty) {
@@ -108,10 +100,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
       _lastOp = null;
     }
   }
-
-  // ==========================================
-  // ✅ Публичные Undo/Redo
-  // ==========================================
 
   bool get canUndo => _pending || _historyIndex > 0;
   bool get canRedo => !_pending && _historyIndex < _history.length - 1;
@@ -136,7 +124,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     print('↪️ Redo: шаг $_historyIndex из ${_history.length - 1}');
   }
 
-  /// Защищаем индексы/плейхед после отката
   void _clampSelection() {
     final count = state.photos.length;
     if (count == 0) {
@@ -153,11 +140,16 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     if (ph > total) {
       _ref.read(playheadMsProvider.notifier).state = total.toDouble();
     }
-    // ✅ защищаем индекс текста после отката
     final tCur = _ref.read(selectedTextIndexProvider);
     if (tCur != null && tCur >= state.texts.length) {
       _ref.read(selectedTextIndexProvider.notifier).state =
           state.texts.isEmpty ? null : state.texts.length - 1;
+    }
+    // ✅ защищаем выделение кейфрейма после отката
+    final kCur = _ref.read(selectedKeyframeProvider);
+    if (kCur != null &&
+        (kCur[0] >= count || kCur[1] >= state.photos[kCur[0]].keyframes.length)) {
+      _ref.read(selectedKeyframeProvider.notifier).state = null;
     }
   }
 
@@ -170,6 +162,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     state = project;
     _ref.read(selectedPhotoIndexProvider.notifier).state = 0;
     _ref.read(selectedTextIndexProvider.notifier).state = null;
+    _ref.read(selectedKeyframeProvider.notifier).state = null;
     _ref.read(playheadMsProvider.notifier).state = 0.0;
     _ref.read(isPlayingProvider.notifier).state = false;
   }
@@ -181,6 +174,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     state = VideoProject(id: const Uuid().v4(), name: 'Новый проект', photos: [], texts: []);
     _ref.read(selectedPhotoIndexProvider.notifier).state = 0;
     _ref.read(selectedTextIndexProvider.notifier).state = null;
+    _ref.read(selectedKeyframeProvider.notifier).state = null;
     _ref.read(playheadMsProvider.notifier).state = 0.0;
     _ref.read(isPlayingProvider.notifier).state = false;
   }
@@ -188,8 +182,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   void clearProject() => reset();
 
   void setName(String name) {
-    // Печатаемый текст: не создаём шаг на каждую букву,
-    // но помечаем состояние как "ожидающее записи"
     state = state.copyWith(name: name);
     _pending = true;
   }
@@ -211,7 +203,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
       try {
         final storedPath = await storage.importPhoto(img.path);
 
-        // ✅ Защита: если импорт не удался, пропускаем фото
         if (storedPath == null) {
           print('⚠️ Пропуск фото (importPhoto вернул null): ${img.path}');
           continue;
@@ -264,11 +255,12 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     } else if (current >= newPhotos.length) {
       _ref.read(selectedPhotoIndexProvider.notifier).state = newPhotos.length - 1;
     }
+    _ref.read(selectedKeyframeProvider.notifier).state = null;
   }
 
   void updatePhotoDuration(int index, int durationMs) {
     if (index < 0 || index >= state.photos.length) return;
-    _commitHistory(op: 'dur'); // склейка: слайдер = 1 шаг
+    _commitHistory(op: 'dur');
     final newPhotos = List<PhotoLayer>.from(state.photos);
     newPhotos[index] = newPhotos[index].copyWith(durationMilliseconds: durationMs);
     state = state.copyWith(photos: newPhotos);
@@ -423,7 +415,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _ref.read(selectedPhotoIndexProvider.notifier).state = index + 1;
   }
 
-  /// Разделить кадр в точке atMs (локальное время внутри кадра).
   void splitPhoto(int index, int atMs) {
     if (index < 0 || index >= state.photos.length) return;
     final p = state.photos[index];
@@ -436,13 +427,13 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     newPhotos.insert(index + 1, right);
     state = state.copyWith(photos: newPhotos);
     _ref.read(selectedPhotoIndexProvider.notifier).state = index + 1;
+    _ref.read(selectedKeyframeProvider.notifier).state = null;
   }
 
   // ==========================================
   // ✅ Фаза 1b: перемещение клипа и дубль текста
   // ==========================================
 
-  /// Переместить клип из from в to (без ReorderableListView-конвенции).
   void movePhoto(int from, int to) {
     if (from == to) return;
     if (from < 0 || from >= state.photos.length) return;
@@ -454,9 +445,9 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     state = state.copyWith(photos: list);
     _ref.read(selectedPhotoIndexProvider.notifier).state = target;
     _ref.read(selectedTextIndexProvider.notifier).state = null;
+    _ref.read(selectedKeyframeProvider.notifier).state = null;
   }
 
-  /// Дублировать текстовый блок сразу после оригинала.
   void duplicateText(int index) {
     if (index < 0 || index >= state.texts.length) return;
     _commitHistory();
@@ -478,7 +469,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   }
 
   // ==========================================
-  // ✅ Кейфреймы (под-срез 1): CRUD + автосортировка по времени
+  // ✅ Кейфреймы: CRUD
   // ==========================================
 
   void addKeyframe(int photoIndex, Keyframe kf) {
@@ -491,17 +482,39 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     state = state.copyWith(photos: np);
   }
 
+  // ✅ БЕЗ сортировки во время drag — иначе индекс «перепрыгивает» на соседний ромбик и drag залипает
   void updateKeyframe(int photoIndex, int kfIndex, Keyframe kf) {
     if (photoIndex < 0 || photoIndex >= state.photos.length) return;
     final p = state.photos[photoIndex];
     if (kfIndex < 0 || kfIndex >= p.keyframes.length) return;
-    _commitHistory(op: 'kf'); // склейка непрерывного движения ползунков
+    _commitHistory();
     final np = List<PhotoLayer>.from(state.photos);
     final kfs = List<Keyframe>.from(p.keyframes);
     kfs[kfIndex] = kf;
-    kfs.sort((a, b) => a.tMs.compareTo(b.tMs));
     np[photoIndex] = p.copyWith(keyframes: kfs);
     state = state.copyWith(photos: np);
+  }
+
+  // ✅ Сортивка ПОСЛЕ drag + восстановление выделения по объекту
+  void normalizeKeyframes(int photoIndex) {
+    if (photoIndex < 0 || photoIndex >= state.photos.length) return;
+    final p = state.photos[photoIndex];
+    if (p.keyframes.length < 2) return;
+    final sel = _ref.read(selectedKeyframeProvider);
+    Keyframe? selKf;
+    if (sel != null && sel[0] == photoIndex && sel[1] < p.keyframes.length) {
+      selKf = p.keyframes[sel[1]];
+    }
+    final sorted = List<Keyframe>.from(p.keyframes)..sort((a, b) => a.tMs.compareTo(b.tMs));
+    final np = List<PhotoLayer>.from(state.photos);
+    np[photoIndex] = p.copyWith(keyframes: sorted);
+    state = state.copyWith(photos: np);
+    if (selKf != null) {
+      final newIdx = sorted.indexOf(selKf);
+      if (newIdx >= 0) {
+        _ref.read(selectedKeyframeProvider.notifier).state = [photoIndex, newIdx];
+      }
+    }
   }
 
   void removeKeyframe(int photoIndex, int kfIndex) {
@@ -537,7 +550,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     _commitHistory();
     final newTexts = List<TextLayer>.from(state.texts)..removeAt(index);
     state = state.copyWith(texts: newTexts);
-    // ✅ сбрасываем выделение текста, если удалили выделенный
     final tCur = _ref.read(selectedTextIndexProvider);
     if (tCur != null) {
       if (newTexts.isEmpty) {
@@ -559,7 +571,6 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
 
   void removeAudioTrack() {
     _commitHistory();
-    // ✅ сохраняем оверлеи/интенсивности
     state = VideoProject(
       id: state.id,
       name: state.name,
@@ -591,7 +602,7 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
   // ==========================================
   void applyHarmonizationMatrices(Map<String, List<double>> matrices) {
     if (matrices.isEmpty) return;
-    _commitHistory(); // одно массовое изменение = один шаг Undo
+    _commitHistory();
 
     final newPhotos = List<PhotoLayer>.from(state.photos);
     bool hasChanges = false;

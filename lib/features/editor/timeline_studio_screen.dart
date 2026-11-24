@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/theme/colors.dart';
 import '../../core/utils/beat_detector.dart';
+import '../../data/models/keyframe.dart';
 import '../../data/models/photo_layer.dart';
 import '../../data/models/text_layer.dart';
 import '../../data/providers/project_provider.dart';
@@ -23,11 +24,7 @@ import 'sheets/transitions_sheet.dart';
 import 'text_tools.dart' hide frameStartMs;
 
 // ==========================================
-// 🎬 Timeline Studio v4.1 (Фаза 1b, double-safe)
-// ✅ reorder-drag клипов (long-press)
-// ✅ иконки переходов: tap = лист, drag = длительность
-// ✅ аудио-блок: drag = offset (startTime)
-// ✅ текст: resize краями, tap = выделение, контекст-бар текста
+// 🎬 Timeline Studio v4.5 (perf: плейхед на ValueNotifier, троттлинг drag ромбика)
 // ==========================================
 class TimelineStudioScreen extends ConsumerStatefulWidget {
   const TimelineStudioScreen({super.key});
@@ -38,12 +35,16 @@ class TimelineStudioScreen extends ConsumerStatefulWidget {
 
 class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   final ScrollController _scroll = ScrollController();
+  final ValueNotifier<double> _playheadVN = ValueNotifier(0.0);
 
   double _sliderValue = 0.4;
   bool _showBeats = true;
   List<double>? _editedBeats;
   BeatAnalysis? _analysis;
   bool _loading = true;
+  int? _kfDragPhoto;
+  double _kfPendingDx = 0;
+  int _lastKfCommit = 0;
 
   static const double _videoH = 96;
   static const double _audioH = 88;
@@ -60,12 +61,20 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onScroll);
+    _playheadVN.value = ref.read(playheadMsProvider);
     _loadBeats();
+  }
+
+  void _onScroll() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _scroll.removeListener(_onScroll);
     _scroll.dispose();
+    _playheadVN.dispose();
     super.dispose();
   }
 
@@ -165,6 +174,42 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     ref.read(playheadMsProvider.notifier).state = next;
   }
 
+  bool _isKeyframeSelected(int photoIndex, int kfIndex) {
+    final sel = ref.watch(selectedKeyframeProvider);
+    return sel != null && sel[0] == photoIndex && sel[1] == kfIndex;
+  }
+
+  void _addKeyframeAtPlayhead() {
+    final photos = ref.read(currentProjectProvider).photos;
+    if (photos.isEmpty) return;
+    final idx = ref.read(selectedPhotoIndexProvider).clamp(0, photos.length - 1);
+    final start = frameStartMs(photos, idx);
+    final localMs = (ref.read(playheadMsProvider) - start)
+        .clamp(0.0, photos[idx].durationMilliseconds.toDouble());
+    ref.read(currentProjectProvider.notifier).addKeyframe(idx, Keyframe(tMs: localMs));
+    HapticFeedback.lightImpact();
+    _snack('◆ Кейфрейм добавлен', Colors.green);
+  }
+
+  void _removeSelectedKeyframe() {
+    final sel = ref.read(selectedKeyframeProvider);
+    if (sel == null) return;
+    ref.read(currentProjectProvider.notifier).removeKeyframe(sel[0], sel[1]);
+    ref.read(selectedKeyframeProvider.notifier).state = null;
+    HapticFeedback.lightImpact();
+    _snack('◆ Кейфрейм удалён', Colors.orange);
+  }
+
+  Widget _playheadTimeLabel(double totalMs) {
+    return ValueListenableBuilder<double>(
+      valueListenable: _playheadVN,
+      builder: (context, ph, _) => Text(
+        '${(ph / 1000).toStringAsFixed(1)}s / ${(totalMs / 1000).toStringAsFixed(1)}s',
+        style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(currentProjectProvider);
@@ -173,7 +218,15 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     final starts = _frameStarts(photos);
     final selectedIndex = ref.watch(selectedPhotoIndexProvider);
     final selectedText = ref.watch(selectedTextIndexProvider);
-    final playheadMs = ref.watch(playheadMsProvider);
+    final selectedKf = ref.watch(selectedKeyframeProvider);
+    if (selectedKf != null &&
+        (selectedKf[0] >= photos.length ||
+            selectedKf[1] >= photos[selectedKf[0]].keyframes.length)) {
+      Future.microtask(() => ref.read(selectedKeyframeProvider.notifier).state = null);
+    }
+    ref.listen<double>(playheadMsProvider, (_, next) {
+      _playheadVN.value = next;
+    });
     final isPlaying = ref.watch(isPlayingProvider);
     final notifier = ref.read(currentProjectProvider.notifier);
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
@@ -191,7 +244,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
 
     final contentWidth = _padLeft + totalMs * _pxPerMs + 160;
     final scrollOffset = _scroll.hasClients ? _scroll.offset : 0.0;
-    final playheadX = _padLeft + playheadMs * _pxPerMs - scrollOffset;
 
     final textMode = selectedText != null && selectedText < texts.length;
 
@@ -313,21 +365,37 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                             top: topOffset,
                             left: 0, right: 0,
                             height: tracksH,
-                            child: IgnorePointer(
-                              child: CustomPaint(
-                                painter: _PlayheadPainter(x: playheadX, color: AppColors.primary),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: topOffset - 4,
-                            left: playheadX - 12,
-                            child: _PlayheadHandle(
-                              onDrag: (dx) {
-                                final next = (playheadMs + dx / _pxPerMs).clamp(0.0, totalMs).toDouble();
-                                ref.read(playheadMsProvider.notifier).state = next;
+                            child: ValueListenableBuilder<double>(
+                              valueListenable: _playheadVN,
+                              builder: (context, ph, _) {
+                                final x = _padLeft + ph * _pxPerMs - scrollOffset;
+                                return IgnorePointer(
+                                  child: CustomPaint(
+                                    painter: _PlayheadPainter(x: x, color: AppColors.primary),
+                                  ),
+                                );
                               },
                             ),
+                          ),
+                          // ✅ ИСПРАВЛЕНО: скобки + onDragEnd
+                          ValueListenableBuilder<double>(
+                            valueListenable: _playheadVN,
+                            builder: (context, ph, _) {
+                              final x = _padLeft + ph * _pxPerMs - scrollOffset;
+                              return Positioned(
+                                top: topOffset - 28,
+                                left: x - 18,
+                                child: _PlayheadHandle(
+                                  onDrag: (dx) {
+                                    final next = (ph + dx / _pxPerMs).clamp(0.0, totalMs).toDouble();
+                                    _playheadVN.value = next;
+                                  },
+                                  onDragEnd: () {
+                                    ref.read(playheadMsProvider.notifier).state = _playheadVN.value;
+                                  },
+                                ),
+                              );
+                            },
                           ),
                           Positioned(
                             top: topOffset,
@@ -372,6 +440,9 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                         }),
                       ]
                     : [
+                        _CtxChip(icon: Icons.diamond_outlined, label: '◆ Кейфрейм', onTap: _addKeyframeAtPlayhead),
+                        if (ref.watch(selectedKeyframeProvider) != null)
+                          _CtxChip(icon: Icons.diamond_outlined, label: 'Удалить ◆', danger: true, onTap: _removeSelectedKeyframe),
                         _CtxChip(icon: Icons.tune, label: 'Настройки', onTap: () => showPhotoSettingsSheet(context, ref, selectedIndex)),
                         _CtxChip(icon: Icons.palette_outlined, label: 'Фильтр', onTap: () => showEffectsSheet(context, ref, [selectedIndex])),
                         _CtxChip(icon: Icons.swap_horiz, label: 'Переход', onTap: () => showTransitionsSheet(context, ref, [selectedIndex])),
@@ -416,10 +487,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                           if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
                         }),
                         const SizedBox(width: 12),
-                        Text(
-                          '${(playheadMs / 1000).toStringAsFixed(1)}s / ${(totalMs / 1000).toStringAsFixed(1)}s',
-                          style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary),
-                        ),
+                        _playheadTimeLabel(totalMs),
                         const Spacer(),
                         IconButton(
                           icon: Icon(Icons.graphic_eq, size: 20, color: _showBeats ? AppColors.primary : AppColors.textMuted),
@@ -461,10 +529,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                               if (_scroll.hasClients) _scroll.jumpTo(_scroll.position.maxScrollExtent);
                             }),
                             const SizedBox(width: 12),
-                            Text(
-                              '${(playheadMs / 1000).toStringAsFixed(1)}s / ${(totalMs / 1000).toStringAsFixed(1)}s',
-                              style: GoogleFonts.jetBrainsMono(fontSize: 12, color: AppColors.primary),
-                            ),
+                            _playheadTimeLabel(totalMs),
                             const Spacer(),
                             IconButton(
                               icon: Icon(Icons.graphic_eq, size: 20, color: _showBeats ? AppColors.primary : AppColors.textMuted),
@@ -496,9 +561,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
-  // ==========================================
-  // Видео-дорожка: reorder-drag + иконки переходов
-  // ==========================================
   Widget _buildVideoTrack(List<PhotoLayer> photos, List<double> starts, double h) {
     return SizedBox(
       height: h,
@@ -554,6 +616,65 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                 onDragEnd: () => ref.read(currentProjectProvider.notifier).endBatch(),
               ),
             ),
+          if (_kfDragPhoto != null && _kfDragPhoto! < photos.length)
+            Positioned(
+              left: _padLeft + starts[_kfDragPhoto!] * _pxPerMs,
+              width: math.max(8.0, photos[_kfDragPhoto!].durationMilliseconds * _pxPerMs - 2),
+              top: 2, bottom: 2,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: AppColors.aiAccent.withOpacity(0.8), width: 2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+              ),
+            ),
+          for (int i = 0; i < photos.length; i++)
+            for (int k = 0; k < photos[i].keyframes.length; k++)
+              Positioned(
+                left: _padLeft + (starts[i] + photos[i].keyframes[k].tMs) * _pxPerMs - 16,
+                top: (h / 2) - 16,
+                width: 32, height: 32,
+                child: _KeyframeHandle(
+                  selected: _isKeyframeSelected(i, k),
+                  onTap: () {
+                    ref.read(selectedKeyframeProvider.notifier).state = [i, k];
+                  },
+                  onDragStart: () {
+                    ref.read(currentProjectProvider.notifier).beginBatch();
+                    _kfPendingDx = 0;
+                    _lastKfCommit = 0;
+                    setState(() => _kfDragPhoto = i);
+                  },
+                  onDrag: (dx) {
+                    _kfPendingDx += dx;
+                    final now = DateTime.now().millisecondsSinceEpoch;
+                    if (now - _lastKfCommit < 33) return;
+                    _lastKfCommit = now;
+                    final delta = _kfPendingDx;
+                    _kfPendingDx = 0;
+                    final kf = photos[i].keyframes[k];
+                    final newT = (kf.tMs + delta / _pxPerMs)
+                        .clamp(0.0, photos[i].durationMilliseconds.toDouble());
+                    ref.read(currentProjectProvider.notifier)
+                        .updateKeyframe(i, k, kf.copyWith(tMs: newT));
+                  },
+                  onDragEnd: () {
+                    if (_kfPendingDx != 0) {
+                      final kf = photos[i].keyframes[k];
+                      final newT = (kf.tMs + _kfPendingDx / _pxPerMs)
+                          .clamp(0.0, photos[i].durationMilliseconds.toDouble());
+                      ref.read(currentProjectProvider.notifier)
+                          .updateKeyframe(i, k, kf.copyWith(tMs: newT));
+                      _kfPendingDx = 0;
+                    }
+                    ref.read(currentProjectProvider.notifier).normalizeKeyframes(i);
+                    ref.read(currentProjectProvider.notifier).endBatch();
+                    setState(() => _kfDragPhoto = null);
+                  },
+                ),
+              ),
         ],
       ),
     );
@@ -568,6 +689,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
       onTap: () {
         ref.read(selectedPhotoIndexProvider.notifier).state = i;
         ref.read(selectedTextIndexProvider.notifier).state = null;
+        ref.read(selectedKeyframeProvider.notifier).state = null;
       },
       onResizeStart: () => ref.read(currentProjectProvider.notifier).beginBatch(),
       onResize: (deltaMs) {
@@ -584,9 +706,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
-  // ==========================================
-  // Аудио-дорожка: drag = offset
-  // ==========================================
   Widget _buildAudioTrack(double totalVideo, double audioVisibleMs, double h) {
     final track = ref.watch(currentProjectProvider).audioTrack;
     final wave = _visibleWave(audioVisibleMs);
@@ -694,9 +813,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
     );
   }
 
-  // ==========================================
-  // Текстовая дорожка: resize краями + tap-выделение
-  // ==========================================
   Widget _buildTextTrack(List<TextLayer> texts, double h) {
     if (texts.isEmpty) {
       return SizedBox(
@@ -869,6 +985,53 @@ class _TransitionHandle extends StatelessWidget {
   }
 }
 
+class _KeyframeHandle extends StatelessWidget {
+  final bool selected;
+  final VoidCallback onTap;
+  final ValueChanged<double> onDrag;
+  final VoidCallback onDragStart;
+  final VoidCallback onDragEnd;
+  const _KeyframeHandle({
+    required this.selected,
+    required this.onTap,
+    required this.onDrag,
+    required this.onDragStart,
+    required this.onDragEnd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 32, height: 32,
+      child: Center(
+        child: GestureDetector(
+          onTap: onTap,
+          onHorizontalDragStart: (_) => onDragStart(),
+          onHorizontalDragUpdate: (d) => onDrag(d.delta.dx),
+          onHorizontalDragEnd: (_) => onDragEnd(),
+          child: Transform.rotate(
+            angle: math.pi / 4,
+            child: Container(
+              width: 22, height: 22,
+              decoration: BoxDecoration(
+                color: selected ? AppColors.aiAccent : AppColors.primary,
+                borderRadius: BorderRadius.circular(3),
+                border: Border.all(color: Colors.white, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: (selected ? AppColors.aiAccent : AppColors.primary).withOpacity(0.7),
+                    blurRadius: selected ? 12 : 6,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _VideoBlock extends StatefulWidget {
   final PhotoLayer photo;
   final bool isSelected;
@@ -1027,9 +1190,11 @@ class _TextBlockState extends State<_TextBlock> {
   }
 }
 
+// ✅ ИСПРАВЛЕНО: добавлен onDragEnd
 class _PlayheadHandle extends StatefulWidget {
   final ValueChanged<double> onDrag;
-  const _PlayheadHandle({required this.onDrag});
+  final VoidCallback? onDragEnd;
+  const _PlayheadHandle({required this.onDrag, this.onDragEnd});
 
   @override
   State<_PlayheadHandle> createState() => _PlayheadHandleState();
@@ -1040,10 +1205,18 @@ class _PlayheadHandleState extends State<_PlayheadHandle> {
   Widget build(BuildContext context) {
     return GestureDetector(
       onHorizontalDragUpdate: (d) => widget.onDrag(d.delta.dx),
+      onHorizontalDragEnd: (_) => widget.onDragEnd?.call(),
       child: Container(
-        width: 24, height: 24,
-        decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-        child: const Icon(Icons.arrow_drop_down, color: Colors.white, size: 20),
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          color: AppColors.aiAccent,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: [
+            BoxShadow(color: AppColors.aiAccent.withOpacity(0.6), blurRadius: 10),
+          ],
+        ),
+        child: const Icon(Icons.arrow_drop_down, color: Colors.white, size: 28),
       ),
     );
   }
