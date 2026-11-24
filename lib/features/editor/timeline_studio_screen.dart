@@ -24,7 +24,7 @@ import 'sheets/transitions_sheet.dart';
 import 'text_tools.dart' hide frameStartMs;
 
 // ==========================================
-// 🎬 Timeline Studio v4.5 (perf: плейхед на ValueNotifier, троттлинг drag ромбика)
+// 🎬 Timeline Studio v4.6 (perf: троттлинг drag плейхеда до 60 fps)
 // ==========================================
 class TimelineStudioScreen extends ConsumerStatefulWidget {
   const TimelineStudioScreen({super.key});
@@ -45,6 +45,8 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   int? _kfDragPhoto;
   double _kfPendingDx = 0;
   int _lastKfCommit = 0;
+  // ✅ Троттлинг drag плейхеда: обновляем VN не чаще 60 fps (16ms)
+  int _lastPlayheadVNUpdate = 0;
 
   static const double _videoH = 96;
   static const double _audioH = 88;
@@ -377,7 +379,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                               },
                             ),
                           ),
-                          // ✅ ИСПРАВЛЕНО: скобки + onDragEnd
+                          // ✅ Троттлинг drag плейхеда до 60 fps
                           ValueListenableBuilder<double>(
                             valueListenable: _playheadVN,
                             builder: (context, ph, _) {
@@ -388,10 +390,15 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                                 child: _PlayheadHandle(
                                   onDrag: (dx) {
                                     final next = (ph + dx / _pxPerMs).clamp(0.0, totalMs).toDouble();
-                                    _playheadVN.value = next;
+                                    final now = DateTime.now().millisecondsSinceEpoch;
+                                    if (now - _lastPlayheadVNUpdate >= 16) {
+                                      _lastPlayheadVNUpdate = now;
+                                      _playheadVN.value = next;
+                                    }
                                   },
                                   onDragEnd: () {
                                     ref.read(playheadMsProvider.notifier).state = _playheadVN.value;
+                                    _lastPlayheadVNUpdate = 0;
                                   },
                                 ),
                               );
@@ -1190,7 +1197,6 @@ class _TextBlockState extends State<_TextBlock> {
   }
 }
 
-// ✅ ИСПРАВЛЕНО: добавлен onDragEnd
 class _PlayheadHandle extends StatefulWidget {
   final ValueChanged<double> onDrag;
   final VoidCallback? onDragEnd;
