@@ -40,13 +40,15 @@ class PhotoLayerAdapter extends TypeAdapter<PhotoLayer> {
       overlayType:
           fields[15] == null ? OverlayType.none : fields[15] as OverlayType,
       overlayIntensity: fields[16] == null ? 0.6 : fields[16] as double,
+      keyframes:
+          fields[40] == null ? [] : (fields[40] as List).cast<Keyframe>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, PhotoLayer obj) {
     writer
-      ..writeByte(17)
+      ..writeByte(18)
       ..writeByte(0)
       ..write(obj.imagePath)
       ..writeByte(1)
@@ -80,7 +82,9 @@ class PhotoLayerAdapter extends TypeAdapter<PhotoLayer> {
       ..writeByte(15)
       ..write(obj.overlayType)
       ..writeByte(16)
-      ..write(obj.overlayIntensity);
+      ..write(obj.overlayIntensity)
+      ..writeByte(40)
+      ..write(obj.keyframes);
   }
 
   @override

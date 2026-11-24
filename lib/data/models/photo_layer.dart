@@ -1,5 +1,6 @@
 import 'package:hive/hive.dart';
 import 'video_project.dart'; // ✅ ДОБАВЛЕНО: для использования OverlayType
+import 'keyframe.dart';       // ✅ Кейфреймы (под-срез 1)
 
 part 'photo_layer.g.dart';
 
@@ -160,6 +161,11 @@ class PhotoLayer {
   @HiveField(16, defaultValue: 0.6)
   final double overlayIntensity;
 
+  // ✅ Кейфреймы (под-срез 1): индекс 40 свободен, старые данные не трогаем.
+  // Дефолт [] — старые проекты (без поля 40) открываются без ошибок.
+  @HiveField(40, defaultValue: const [])
+  final List<Keyframe> keyframes;
+
   PhotoLayer({
     required this.imagePath,
     required this.durationMilliseconds,
@@ -176,8 +182,9 @@ class PhotoLayer {
     this.transitionDurationMs = 600,
     this.liveMotion = LiveMotion.breathe,
     this.harmonizationMatrix,
-    this.overlayType = OverlayType.none, // ✅
-    this.overlayIntensity = 0.6,         // ✅
+    this.overlayType = OverlayType.none,
+    this.overlayIntensity = 0.6,
+    this.keyframes = const [],          // ✅ кейфреймы
   });
 
   PhotoLayer copyWith({
@@ -196,8 +203,9 @@ class PhotoLayer {
     int? transitionDurationMs,
     LiveMotion? liveMotion,
     List<double>? harmonizationMatrix,
-    OverlayType? overlayType,       // ✅
-    double? overlayIntensity,       // ✅
+    OverlayType? overlayType,
+    double? overlayIntensity,
+    List<Keyframe>? keyframes,          // ✅ кейфреймы
   }) {
     return PhotoLayer(
       imagePath: imagePath ?? this.imagePath,
@@ -215,8 +223,9 @@ class PhotoLayer {
       transitionDurationMs: transitionDurationMs ?? this.transitionDurationMs,
       liveMotion: liveMotion ?? this.liveMotion,
       harmonizationMatrix: harmonizationMatrix ?? this.harmonizationMatrix,
-      overlayType: overlayType ?? this.overlayType,           // ✅
-      overlayIntensity: overlayIntensity ?? this.overlayIntensity, // ✅
+      overlayType: overlayType ?? this.overlayType,
+      overlayIntensity: overlayIntensity ?? this.overlayIntensity,
+      keyframes: keyframes ?? this.keyframes,   // ✅ кейфреймы
     );
   }
 }

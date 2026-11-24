@@ -12,6 +12,7 @@ import 'package:gal/gal.dart';
 import '../../core/utils/live_motion.dart';
 import '../../core/utils/overlay_render.dart';
 import '../../core/utils/photo_fit.dart';
+import '../models/keyframe.dart';       // ✅ Кейфреймы (под-срез 1)
 import '../models/photo_layer.dart';
 import '../models/text_layer.dart';
 import '../models/video_project.dart';
@@ -509,7 +510,17 @@ class ExportService {
 
     double entranceOpacity = 1.0;
 
+    // ✅ Кейфреймы: семплируем момент и трансформируем вокруг центра
+    final kt = sampleKeyframes(currentPhoto.keyframes, elapsedMs);
+
     canvas.save();
+    if (kt.scale != 1.0 || kt.offsetX != 0.0 || kt.offsetY != 0.0 || kt.rotation != 0.0) {
+      canvas.translate(width / 2, height / 2);
+      canvas.rotate(kt.rotation);
+      canvas.scale(kt.scale, kt.scale);
+      canvas.translate(-width / 2, -height / 2);
+      canvas.translate(kt.offsetX * width, kt.offsetY * height);
+    }
 
     switch (currentPhoto.entranceAnimation) {
       case EntranceAnimation.none:
@@ -547,7 +558,7 @@ class ExportService {
       return Paint()
         ..colorFilter = colorFilter
         ..color = Colors.white
-            .withOpacity((entranceOpacity * extraOpacity).clamp(0.0, 1.0));
+            .withOpacity((entranceOpacity * extraOpacity * kt.opacity).clamp(0.0, 1.0));
     }
 
     if (currentPhoto.fitMode == FitMode.contain) {

@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 export 'media_storage_provider.dart';
 import '../models/audio_track.dart';
+import '../models/keyframe.dart';         // ✅ Кейфреймы (под-срез 1)
 import '../models/photo_layer.dart';
 import '../models/text_layer.dart';
 import '../models/video_project.dart';
@@ -206,16 +207,16 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     final storage = _ref.read(mediaStorageProvider);
     final newPhotos = <PhotoLayer>[];
 
-        for (final img in images) {
+    for (final img in images) {
       try {
         final storedPath = await storage.importPhoto(img.path);
-        
+
         // ✅ Защита: если импорт не удался, пропускаем фото
         if (storedPath == null) {
           print('⚠️ Пропуск фото (importPhoto вернул null): ${img.path}');
           continue;
         }
-        
+
         print('📸 ФОТО СОХРАНЕНО В ПАПКУ: $storedPath');
         try {
           final cacheFile = File(img.path);
@@ -474,6 +475,44 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     );
     state = state.copyWith(texts: [...state.texts, copy]);
     _ref.read(selectedTextIndexProvider.notifier).state = state.texts.length;
+  }
+
+  // ==========================================
+  // ✅ Кейфреймы (под-срез 1): CRUD + автосортировка по времени
+  // ==========================================
+
+  void addKeyframe(int photoIndex, Keyframe kf) {
+    if (photoIndex < 0 || photoIndex >= state.photos.length) return;
+    _commitHistory();
+    final np = List<PhotoLayer>.from(state.photos);
+    final p = np[photoIndex];
+    final kfs = [...p.keyframes, kf]..sort((a, b) => a.tMs.compareTo(b.tMs));
+    np[photoIndex] = p.copyWith(keyframes: kfs);
+    state = state.copyWith(photos: np);
+  }
+
+  void updateKeyframe(int photoIndex, int kfIndex, Keyframe kf) {
+    if (photoIndex < 0 || photoIndex >= state.photos.length) return;
+    final p = state.photos[photoIndex];
+    if (kfIndex < 0 || kfIndex >= p.keyframes.length) return;
+    _commitHistory(op: 'kf'); // склейка непрерывного движения ползунков
+    final np = List<PhotoLayer>.from(state.photos);
+    final kfs = List<Keyframe>.from(p.keyframes);
+    kfs[kfIndex] = kf;
+    kfs.sort((a, b) => a.tMs.compareTo(b.tMs));
+    np[photoIndex] = p.copyWith(keyframes: kfs);
+    state = state.copyWith(photos: np);
+  }
+
+  void removeKeyframe(int photoIndex, int kfIndex) {
+    if (photoIndex < 0 || photoIndex >= state.photos.length) return;
+    final p = state.photos[photoIndex];
+    if (kfIndex < 0 || kfIndex >= p.keyframes.length) return;
+    _commitHistory();
+    final np = List<PhotoLayer>.from(state.photos);
+    final kfs = List<Keyframe>.from(p.keyframes)..removeAt(kfIndex);
+    np[photoIndex] = p.copyWith(keyframes: kfs);
+    state = state.copyWith(photos: np);
   }
 
   // ==========================================

@@ -11,6 +11,7 @@ import 'package:uuid/uuid.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/colors.dart';
 import 'data/models/audio_track.dart';
+import 'data/models/keyframe.dart';          // ✅ Кейфреймы (под-срез 1)
 import 'data/models/photo_layer.dart';
 import 'data/models/template.dart';
 import 'data/models/text_layer.dart';
@@ -43,6 +44,7 @@ void main() async {
   Hive.registerAdapter(BackgroundTypeAdapter());     // typeId: 11
   Hive.registerAdapter(OverlayTypeAdapter());        // typeId: 12
   Hive.registerAdapter(LiveMotionAdapter());         // typeId: 13
+  Hive.registerAdapter(KeyframeAdapter());           // typeId: 14 (кейфреймы)
 
   // 2. Проверка первого запуска и создание демо-проекта
   final prefs = await SharedPreferences.getInstance();
@@ -225,7 +227,7 @@ class _OnboardingGateState extends State<_OnboardingGate> {
     return p.getBool('onboardingSeen') ?? false;
   }
 
-    Future<void> _markSeen() async {
+  Future<void> _markSeen() async {
     final p = await SharedPreferences.getInstance();
     await p.setBool('onboardingSeen', true);
     if (mounted) {
@@ -241,7 +243,7 @@ class _OnboardingGateState extends State<_OnboardingGate> {
       future: _seen,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-                   return Scaffold(
+          return Scaffold(
             backgroundColor: AppColors.background,
             body: Center(
               child: CircularProgressIndicator(color: AppColors.primary),
