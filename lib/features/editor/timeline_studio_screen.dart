@@ -18,13 +18,18 @@ import 'crop/crop_editor_screen.dart';
 import 'playback.dart';
 import 'sheets/effects_sheet.dart';
 import 'sheets/format_sheet.dart';
+import 'sheets/keyframe_sheet.dart';
 import 'sheets/live_motion_sheet.dart';
 import 'sheets/photo_settings_sheet.dart';
 import 'sheets/transitions_sheet.dart';
 import 'text_tools.dart' hide frameStartMs;
 
 // ==========================================
-// 🎬 Timeline Studio v4.6 (perf: троттлинг drag плейхеда до 60 fps)
+// 🎬 Timeline Studio v4.6 (под-срез 2: кейфреймы)
+// ✅ ромбики ◆ на клипах
+// ✅ кнопка "◆ Кейфрейм" + "Удалить ◆"
+// ✅ подсветка границ клипа при drag кейфрейма
+// ✅ троттлинг drag плейхеда до 60 fps
 // ==========================================
 class TimelineStudioScreen extends ConsumerStatefulWidget {
   const TimelineStudioScreen({super.key});
@@ -45,7 +50,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
   int? _kfDragPhoto;
   double _kfPendingDx = 0;
   int _lastKfCommit = 0;
-  // ✅ Троттлинг drag плейхеда: обновляем VN не чаще 60 fps (16ms)
   int _lastPlayheadVNUpdate = 0;
 
   static const double _videoH = 96;
@@ -379,7 +383,6 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                               },
                             ),
                           ),
-                          // ✅ Троттлинг drag плейхеда до 60 fps
                           ValueListenableBuilder<double>(
                             valueListenable: _playheadVN,
                             builder: (context, ph, _) {
@@ -647,6 +650,7 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                   selected: _isKeyframeSelected(i, k),
                   onTap: () {
                     ref.read(selectedKeyframeProvider.notifier).state = [i, k];
+                    showKeyframeSheet(context, ref, i, k);
                   },
                   onDragStart: () {
                     ref.read(currentProjectProvider.notifier).beginBatch();
