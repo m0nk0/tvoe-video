@@ -23,12 +23,12 @@ import 'sheets/live_motion_sheet.dart';
 import 'sheets/photo_settings_sheet.dart';
 import 'sheets/transitions_sheet.dart';
 import 'text_tools.dart' hide frameStartMs;
+import 'widgets/preview_area.dart'; // ✅ Превью над таймлайном (портрет)
 
 // ==========================================
-// 🎬 Timeline Studio v4.6 (под-срез 2: кейфреймы)
-// ✅ ромбики ◆ на клипах
-// ✅ кнопка "◆ Кейфрейм" + "Удалить ◆"
-// ✅ подсветка границ клипа при drag кейфрейма
+// 🎬 Timeline Studio v4.7
+// ✅ превью над таймлайном в портрете (единый рендер с редактором)
+// ✅ ромбики ◆ кейфреймов + лист ползунков
 // ✅ троттлинг drag плейхеда до 60 fps
 // ==========================================
 class TimelineStudioScreen extends ConsumerStatefulWidget {
@@ -324,15 +324,31 @@ class _TimelineStudioScreenState extends ConsumerState<TimelineStudioScreen> {
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
                 : LayoutBuilder(
                     builder: (context, constraints) {
-                      final double scale = (((constraints.maxHeight - 2) / (_baseTracksH - 2)).clamp(0.30, 1.0)).toDouble();
+                      // ✅ Превью в портрете: компактное сверху, дорожки прижаты вниз
+                      final bool showPreview = !isLandscape;
+                      final double previewH = showPreview
+                          ? math.min(constraints.maxHeight * 0.45, 300.0)
+                          : 0.0;
+                      final double tracksAreaH = constraints.maxHeight - previewH;
+                      final double scale = (((tracksAreaH - 2) / (_baseTracksH - 2)).clamp(0.30, 1.0)).toDouble();
                       final double vH = _videoH * scale;
                       final double aH = _audioH * scale;
                       final double tH = _textH * scale;
                       final double tracksH = vH + aH + tH + 2;
-                      final double topOffset = (((constraints.maxHeight - tracksH) / 2).clamp(0.0, constraints.maxHeight)).toDouble();
+                      final double topOffset = showPreview
+                          ? (constraints.maxHeight - tracksH).clamp(0.0, constraints.maxHeight).toDouble()
+                          : (((constraints.maxHeight - tracksH) / 2).clamp(0.0, constraints.maxHeight)).toDouble();
 
                       return Stack(
                         children: [
+                          // ✅ Превью над таймлайном (только портрет)
+                          if (showPreview)
+                            Positioned(
+                              top: 0,
+                              left: 8, right: 8,
+                              height: previewH,
+                              child: const EditorPreviewArea(),
+                            ),
                           Positioned(
                             top: topOffset - 12,
                             left: 8, right: 8,

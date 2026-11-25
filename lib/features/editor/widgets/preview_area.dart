@@ -11,6 +11,7 @@ import '../../../core/utils/cinematic_render.dart';
 import '../../../core/utils/live_motion.dart';
 import '../../../core/utils/overlay_render.dart';
 import '../../../core/utils/photo_fit.dart';
+import '../../../data/models/keyframe.dart'; // ✅ Под-срез 4: живой предпросмотр кейфреймов
 import '../../../data/models/photo_layer.dart';
 import '../../../data/models/text_layer.dart';
 import '../../../data/models/video_project.dart';
@@ -137,22 +138,15 @@ class _EditorPreviewAreaState extends ConsumerState<EditorPreviewArea> with Sing
     final hasPhotos = project.photos.isNotEmpty;
     final safeIndex = hasPhotos ? selectedIndex.clamp(0, project.photos.length - 1) : 0;
     final currentPhoto = hasPhotos ? project.photos[safeIndex] : null;
-    
+
     final currentTransition = currentPhoto?.transition ?? TransitionType.none;
     final currentFilter = currentPhoto?.filter;
     final liveMotion = currentPhoto?.liveMotion ?? LiveMotion.none;
     final cinematicIntensity = project.cinematicIntensity;
 
-    // ✅ ИСПРАВЛЕНО: Безопасная проверка оверлея кадра
-final hasFrameOverlay = currentPhoto != null && currentPhoto!.overlayType != OverlayType.none;
-
-final frameOverlay = hasFrameOverlay 
-    ? currentPhoto!.overlayType 
-    : project.overlayType;
-    
-final frameOverlayIntensity = hasFrameOverlay 
-    ? currentPhoto!.overlayIntensity 
-    : project.overlayIntensity;
+    final hasFrameOverlay = currentPhoto != null && currentPhoto.overlayType != OverlayType.none;
+    final frameOverlay = hasFrameOverlay ? currentPhoto.overlayType : project.overlayType;
+    final frameOverlayIntensity = hasFrameOverlay ? currentPhoto.overlayIntensity : project.overlayIntensity;
 
     if (currentPhoto != null) _ensureSize(currentPhoto.imagePath);
 
@@ -222,33 +216,51 @@ final frameOverlayIntensity = hasFrameOverlay
                                               final liveDst = cinematicResult.rect;
                                               final cinematicParams = cinematicResult.params;
 
-                                              return Stack(
-                                                children: [
-                                                  if (currentPhoto.fitMode == FitMode.contain)
-                                                    Positioned.fill(
-                                                      child: currentPhoto.backgroundType == BackgroundType.blur
-                                                          ? _buildBlurBackground(currentPhoto)
-                                                          : Container(color: Color(currentPhoto.backgroundColor)),
+                                              // ✅ Под-срез 4: семплируем кейфреймы в текущий момент кадра
+                                              final kt = sampleKeyframes(currentPhoto.keyframes, elapsedInSegment);
+
+                                              // ✅ Transform повторяет порядок трансформаций export_service:
+                                              //    rotate+scale вокруг центра, затем сдвиг на offset*canvas
+                                              return Transform.translate(
+                                                offset: Offset(kt.offsetX * canvas.width, kt.offsetY * canvas.height),
+                                                child: Transform.rotate(
+                                                  angle: kt.rotation,
+                                                  child: Transform.scale(
+                                                    scale: kt.scale,
+                                                    child: Stack(
+                                                      children: [
+                                                        if (currentPhoto.fitMode == FitMode.contain)
+                                                          Positioned.fill(
+                                                            child: currentPhoto.backgroundType == BackgroundType.blur
+                                                                ? _buildBlurBackground(currentPhoto)
+                                                                : Container(color: Color(currentPhoto.backgroundColor)),
+                                                          ),
+                                                        Positioned(
+                                                          left: liveDst.left,
+                                                          top: liveDst.top,
+                                                          width: liveDst.width,
+                                                          height: liveDst.height,
+                                                          // ✅ прозрачность кейфрейма только на фото (как в экспорте)
+                                                          child: Opacity(
+                                                            opacity: kt.opacity.clamp(0.0, 1.0),
+                                                            child: currentPhoto.harmonizationMatrix != null
+                                                                ? ColorFiltered(
+                                                                    colorFilter: ColorFilter.matrix(currentPhoto.harmonizationMatrix!),
+                                                                    child: Image.file(File(currentPhoto.imagePath), fit: BoxFit.fill, errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: AppColors.error))),
+                                                                  )
+                                                                : Image.file(File(currentPhoto.imagePath), fit: BoxFit.fill, errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: AppColors.error))),
+                                                          ),
+                                                        ),
+                                                        if (cinematicIntensity > 0.01)
+                                                          Positioned.fill(
+                                                            child: IgnorePointer(
+                                                              child: CustomPaint(painter: _CinematicPainter(params: cinematicParams)),
+                                                            ),
+                                                          ),
+                                                      ],
                                                     ),
-                                                  Positioned(
-                                                    left: liveDst.left,
-                                                    top: liveDst.top,
-                                                    width: liveDst.width,
-                                                    height: liveDst.height,
-                                                    child: currentPhoto.harmonizationMatrix != null
-                                                        ? ColorFiltered(
-                                                            colorFilter: ColorFilter.matrix(currentPhoto.harmonizationMatrix!),
-                                                            child: Image.file(File(currentPhoto.imagePath), fit: BoxFit.fill, errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: AppColors.error))),
-                                                          )
-                                                        : Image.file(File(currentPhoto.imagePath), fit: BoxFit.fill, errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.broken_image, color: AppColors.error))),
                                                   ),
-                                                  if (cinematicIntensity > 0.01)
-                                                    Positioned.fill(
-                                                      child: IgnorePointer(
-                                                        child: CustomPaint(painter: _CinematicPainter(params: cinematicParams)),
-                                                      ),
-                                                    ),
-                                                ],
+                                                ),
                                               );
                                             },
                                           ),
@@ -258,8 +270,7 @@ final frameOverlayIntensity = hasFrameOverlay
                                   ),
                                 ),
                                 ...buildTextOverlays(project, safeIndex, isEditing: _isEditingText, onPositionChanged: _updateTextPosition),
-                                
-                                // ✅ ИСПРАВЛЕНО: Используем frameOverlay и frameOverlayIntensity
+
                                 if (frameOverlay != OverlayType.none)
                                   Positioned.fill(
                                     child: IgnorePointer(
@@ -267,15 +278,15 @@ final frameOverlayIntensity = hasFrameOverlay
                                         valueListenable: _overlayTimeMs,
                                         builder: (context, timeMs, _) => CustomPaint(
                                           painter: _OverlayPainter(
-                                            type: frameOverlay, 
-                                            timeMs: timeMs, 
-                                            intensity: frameOverlayIntensity
+                                            type: frameOverlay,
+                                            timeMs: timeMs,
+                                            intensity: frameOverlayIntensity,
                                           ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                  
+
                                 if (_isEditingText)
                                   Positioned(
                                     top: 16, left: 16,
