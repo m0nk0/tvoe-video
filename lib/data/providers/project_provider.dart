@@ -527,7 +527,15 @@ class ProjectNotifier extends StateNotifier<VideoProject> {
     np[photoIndex] = p.copyWith(keyframes: kfs);
     state = state.copyWith(photos: np);
   }
-
+    void setKeyframes(int photoIndex, List<Keyframe> kfs) {
+    if (photoIndex < 0 || photoIndex >= state.photos.length) return;
+    _commitHistory();
+    final np = List<PhotoLayer>.from(state.photos);
+    np[photoIndex] = np[photoIndex].copyWith(
+      keyframes: List<Keyframe>.from(kfs)..sort((a, b) => a.tMs.compareTo(b.tMs)),
+    );
+    state = state.copyWith(photos: np);
+  }
   // ==========================================
   // Текст
   // ==========================================

@@ -1,28 +1,21 @@
 import 'dart:math' as math;
 
+import '../../data/models/keyframe.dart';
 import '../../data/models/photo_layer.dart';
+import '../../data/models/video_project.dart';
+import 'montage_genome.dart';
 import 'smart_analyzer.dart';
 
+export 'montage_genome.dart'
+    show MontageStyle, MusicProfile, MontageGenome, TransFamily, MotionPolicy, GradePolicy;
+
 // ==========================================
-// Умный монтаж: генератор клипа из анализа фото
-// ✅ 8 стилей: 4 базовых (авто-детект) + 4 тематических (ручной выбор)
-// ✅ Трендовые переходы используются ИИ в подходящих стилях
+// 🎬 AI-режиссёр: скоринг всех 8 тем + геномный план клипа
+// ✅ движение/оверлеи/микро-зум-кейфреймы в плане
+// ✅ seed → re-roll; переходы зависят от смены сцены и энергии
+// ✅ анти-амплификация: грейд не усиливает родной тон кадра
 // ==========================================
 
-/// Стиль монтажа
-enum MontageStyle {
-  auto, // определить автоматически
-  family, // семейный: плавный, тёплый
-  travel, // путешествие: динамичный, сочный
-  party, // вечеринка: быстрый, яркий
-  romance, // романтика: медленный, нежный
-  birthday, // 🎂 день рождения: бодрый, праздничный
-  wedding, // 💍 свадьба: плавный, торжественный
-  newyear, // 🎄 новый год: средний, волшебный
-  nostalgia, // 📼 ностальгия: медленный, винтажный
-}
-
-/// План одного кадра будущего клипа
 class MontageFramePlan {
   final String imagePath;
   final int durationMs;
@@ -33,6 +26,12 @@ class MontageFramePlan {
   final FitMode fitMode;
   final double offsetX;
   final double offsetY;
+  // ✅ новые гены
+  final LiveMotion liveMotion;
+  final OverlayType overlayType;
+  final double overlayIntensity;
+  final List<Keyframe> keyframes;
+  final int beatsPerFrame;
 
   const MontageFramePlan({
     required this.imagePath,
@@ -44,379 +43,263 @@ class MontageFramePlan {
     required this.fitMode,
     required this.offsetX,
     required this.offsetY,
+    this.liveMotion = LiveMotion.none,
+    this.overlayType = OverlayType.none,
+    this.overlayIntensity = 0.4,
+    this.keyframes = const [],
+    this.beatsPerFrame = 2,
   });
+
+  MontageFramePlan copyWith({
+    int? durationMs,
+    TransitionType? transition,
+    FilterType? filter,
+    EntranceAnimation? entrance,
+    int? entranceDurationMs,
+    LiveMotion? liveMotion,
+    OverlayType? overlayType,
+    double? overlayIntensity,
+    List<Keyframe>? keyframes,
+    int? beatsPerFrame,
+  }) =>
+      MontageFramePlan(
+        imagePath: imagePath,
+        durationMs: durationMs ?? this.durationMs,
+        transition: transition ?? this.transition,
+        filter: filter ?? this.filter,
+        entrance: entrance ?? this.entrance,
+        entranceDurationMs: entranceDurationMs ?? this.entranceDurationMs,
+        fitMode: fitMode,
+        offsetX: offsetX,
+        offsetY: offsetY,
+        liveMotion: liveMotion ?? this.liveMotion,
+        overlayType: overlayType ?? this.overlayType,
+        overlayIntensity: overlayIntensity ?? this.overlayIntensity,
+        keyframes: keyframes ?? this.keyframes,
+        beatsPerFrame: beatsPerFrame ?? this.beatsPerFrame,
+      );
 }
 
 class SmartMontage {
   // ==========================================
-  // Автоопределение стиля по набору фото
-  // ✅ Выбирает ТОЛЬКО из 4 базовых стилей
+  // ✅ Скоринг ВСЕХ 8 тем (вместо 4 порогов)
   // ==========================================
   static MontageStyle autoDetect(List<SmartPhotoAnalysis> analyses) {
-    if (analyses.isEmpty) return MontageStyle.family;
+    final ranked = rankThemes(analyses);
+    return ranked.isEmpty ? MontageStyle.family : ranked.first.key;
+  }
 
-    int group = 0, vibrant = 0, warm = 0, cool = 0, smiles = 0;
-    for (final a in analyses) {
-      if (a.faceCount >= 2) group++;
-      if (a.mood == PhotoMood.vibrant) vibrant++;
-      if (a.mood == PhotoMood.warm) warm++;
-      if (a.mood == PhotoMood.cool) cool++;
-      if (a.hasSmile) smiles++;
+  static List<MapEntry<MontageStyle, double>> rankThemes(List<SmartPhotoAnalysis> a) {
+    if (a.isEmpty) return [const MapEntry(MontageStyle.family, 1)];
+    final n = a.length.toDouble();
+    double faces = 0, group = 0, smiles = 0, warm = 0, cool = 0, vibrant = 0, muted = 0, dark = 0, pastel = 0;
+    for (final x in a) {
+      if (x.faceCount > 0) faces++;
+      if (x.faceCount >= 2) group++;
+      if (x.hasSmile) smiles++;
+      if (x.mood == PhotoMood.warm) warm++;
+      if (x.mood == PhotoMood.cool) cool++;
+      if (x.mood == PhotoMood.vibrant) vibrant++;
+      if (x.mood == PhotoMood.muted) muted++;
+      if (x.brightness < 0.28) dark++;
+      if (x.brightness > 0.68 && _satOf(x.dominantColor) < 0.25) pastel++;
     }
+    faces /= n; group /= n; smiles /= n; warm /= n; cool /= n; vibrant /= n; muted /= n; dark /= n; pastel /= n;
 
-    final n = analyses.length;
-    if (vibrant >= n / 3 || (smiles >= n / 2 && group >= n / 3)) {
-      return MontageStyle.party;
+    final scores = <MontageStyle, double>{
+      MontageStyle.family: faces * 1.2 + warm * 0.6 + muted * 0.5 + smiles * 0.4,
+      MontageStyle.travel: (1 - faces) * 1.1 + cool * 0.8 + vibrant * 0.5,
+      MontageStyle.party: vibrant * 1.1 + group * 0.7 + smiles * 0.6 + dark * 0.3,
+      MontageStyle.romance: warm * 1.0 + (faces > 0 && faces < 0.6 ? 0.6 : 0) + muted * 0.3,
+      MontageStyle.birthday: vibrant * 0.9 + smiles * 0.9 + group * 0.5,
+      MontageStyle.wedding: pastel * 1.3 + faces * 0.5 + warm * 0.3,
+      MontageStyle.newyear: cool * 0.8 + dark * 0.7 + vibrant * 0.4,
+      MontageStyle.nostalgia: muted * 1.2 + (1 - vibrant) * 0.4 + warm * 0.2,
+    };
+    final list = scores.entries.toList()..sort((x, y) => y.value.compareTo(x.value));
+    return list;
+  }
+
+  static double _satOf(int argb) {
+    final r = (argb & 0xFF) / 255.0;
+    final g = ((argb >> 8) & 0xFF) / 255.0;
+    final b = ((argb >> 16) & 0xFF) / 255.0;
+    final mx = math.max(r, math.max(g, b));
+    final mn = math.min(r, math.min(g, b));
+    final l = (mx + mn) / 2;
+    if (mx == mn) return 0;
+    return (mx - mn) / (1 - (2 * l - 1).abs());
+  }
+
+  static double _colorDist(int c1, int c2) {
+    double d(int sh) {
+      final a = ((c1 >> sh) & 0xFF).toDouble();
+      final b = ((c2 >> sh) & 0xFF).toDouble();
+      return (a - b) * (a - b);
     }
-    if (cool >= n / 3) return MontageStyle.travel;
-    if (warm >= n / 3 && smiles >= n / 3) return MontageStyle.romance;
-    return MontageStyle.family;
+    return math.sqrt(d(0) + d(8) + d(16));
   }
 
   // ==========================================
-  // Генерация плана клипа
+  // Генерация плана по геному
   // ==========================================
   static List<MontageFramePlan> generate({
     required List<SmartPhotoAnalysis> analyses,
     required MontageStyle style,
     required double canvasAspect,
+    int seed = 1,
+    MusicProfile? music,
+    MontageGenome? genome,
   }) {
     if (analyses.isEmpty) return [];
+    final theme = style == MontageStyle.auto ? autoDetect(analyses) : style;
+    final g = genome ??
+        MontageGenome.sample(theme: theme, analyses: analyses, music: music, seed: seed);
+    final r = math.Random(seed * 7919 + 13);
 
-    final effective =
-        style == MontageStyle.auto ? autoDetect(analyses) : style;
-
-    // ✅ Лучшее фото — в финал (эффектная концовка)
     final list = List<SmartPhotoAnalysis>.from(analyses);
-    if (list.length >= 3) {
+    if (g.structure == StructurePolicy.finale && list.length >= 3) {
       int best = 0;
-      double bestScore = -1;
+      double bs = -1;
       for (int i = 0; i < list.length; i++) {
         final s = _score(list[i]);
-        if (s > bestScore) {
-          bestScore = s;
-          best = i;
-        }
+        if (s > bs) { bs = s; best = i; }
       }
-      final finale = list.removeAt(best);
-      list.add(finale);
+      list.add(list.removeAt(best));
     }
 
-    return [
-      for (int i = 0; i < list.length; i++)
-        _planFor(list[i], effective, i, canvasAspect),
-    ];
+    final plans = <MontageFramePlan>[];
+    for (int i = 0; i < list.length; i++) {
+      final a = list[i];
+      final prev = i > 0 ? list[i - 1] : null;
+
+      // длительность
+      int dur = g.baseMs;
+      if (a.isSlowPaced) dur += 600;
+      if (a.isFastPaced) dur -= 500;
+      dur = dur.clamp(1000, 5000);
+
+      // переход: family + смена сцены
+      TransitionType tr = TransitionType.none;
+      if (i > 0) {
+        final pool = _familyPool(g.family);
+        final dist = prev == null ? 999.0 : _colorDist(prev.dominantColor, a.dominantColor);
+        final softSubset = pool.where((t) =>
+            t == TransitionType.fade || t == TransitionType.dissolve || t == TransitionType.blur).toList();
+        final usePool = (dist < 45 && softSubset.isNotEmpty) ? softSubset : pool;
+        tr = usePool[r.nextInt(usePool.length)];
+      }
+
+      // движение по политике + содержанию кадра
+      LiveMotion motion;
+      List<Keyframe> kfs = const [];
+      switch (g.motion) {
+        case MotionPolicy.calm:
+          motion = a.faceCount > 0
+              ? (r.nextBool() ? LiveMotion.breathe : LiveMotion.zoomIn)
+              : (r.nextBool() ? LiveMotion.breathe : LiveMotion.zoomOut);
+          break;
+        case MotionPolicy.scenic:
+          motion = i.isEven ? LiveMotion.panLeft : LiveMotion.panRight;
+          break;
+        case MotionPolicy.lively:
+          motion = [LiveMotion.zoomIn, LiveMotion.zoomOut, LiveMotion.breathe][r.nextInt(3)];
+          break;
+        case MotionPolicy.static:
+          motion = LiveMotion.none;
+          // микро-зум кейфреймами, чтобы кадр не был мёртвым
+          kfs = [
+            Keyframe(tMs: 0, scale: 1.0),
+            Keyframe(tMs: dur.toDouble(), scale: 1.06),
+          ];
+          break;
+      }
+
+      // ✅ грейд + анти-амплификация: не усиливаем родной тон кадра
+      FilterType filter = _gradeFilter(g.grade);
+      if (g.grade == GradePolicy.cool && a.mood == PhotoMood.cool) filter = FilterType.none;
+      if (g.grade == GradePolicy.warm && a.mood == PhotoMood.warm) filter = FilterType.none;
+      if (g.grade == GradePolicy.vivid && a.mood == PhotoMood.muted) filter = FilterType.none;
+
+      // появление
+      final entrances = g.entrance == EntrancePolicy.soft
+          ? [EntranceAnimation.fadeIn, EntranceAnimation.none, EntranceAnimation.fadeIn]
+          : [EntranceAnimation.zoomIn, EntranceAnimation.slideFromLeft, EntranceAnimation.slideFromRight, EntranceAnimation.slideFromBottom];
+      final entrance = entrances[r.nextInt(entrances.length)];
+
+      final offsets = _smartOffsets(a, canvasAspect);
+
+      plans.add(MontageFramePlan(
+        imagePath: a.imagePath,
+        durationMs: dur,
+        transition: tr,
+        filter: filter,
+        entrance: entrance,
+        entranceDurationMs: _entranceMsFor(g.theme),
+        fitMode: FitMode.cover,
+        offsetX: offsets[0],
+        offsetY: offsets[1],
+        liveMotion: motion,
+        overlayType: g.overlay,
+        overlayIntensity: g.overlayIntensity,
+        keyframes: kfs,
+        beatsPerFrame: g.tempoK,
+      ));
+    }
+    return plans;
+  }
+
+  static List<TransitionType> _familyPool(TransFamily f) {
+    switch (f) {
+      case TransFamily.soft:
+        return [TransitionType.fade, TransitionType.dissolve, TransitionType.blur];
+      case TransFamily.dynamic:
+        return [TransitionType.slideLeft, TransitionType.slideRight, TransitionType.zoomIn, TransitionType.zoomOut, TransitionType.whipPan, TransitionType.crossZoom, TransitionType.wipe];
+      case TransFamily.glitch:
+        return [TransitionType.glitch, TransitionType.rgbSplit, TransitionType.flash, TransitionType.spinBlur];
+      case TransFamily.reveal:
+        return [TransitionType.circleReveal, TransitionType.wipe, TransitionType.crossZoom, TransitionType.flash];
+    }
+  }
+
+  static FilterType _gradeFilter(GradePolicy g) {
+    switch (g) {
+      case GradePolicy.neutral: return FilterType.none;
+      case GradePolicy.warm: return FilterType.warm;
+      case GradePolicy.cool: return FilterType.cool;
+      case GradePolicy.vivid: return FilterType.vivid;
+      case GradePolicy.vintage: return FilterType.vintage;
+      case GradePolicy.film: return FilterType.film;
+    }
   }
 
   static double _score(SmartPhotoAnalysis a) =>
-      a.complexityScore +
-      (a.hasSmile ? 0.3 : 0.0) +
-      (a.faceCount > 0 ? 0.2 : 0.0);
-
-  // ==========================================
-  // План одного кадра
-  // ==========================================
-  static MontageFramePlan _planFor(
-    SmartPhotoAnalysis a,
-    MontageStyle style,
-    int index,
-    double canvasAspect,
-  ) {
-    // ---- Длительность (характер стиля) ----
-    int base;
-    switch (style) {
-      case MontageStyle.party:
-        base = 1600;
-        break;
-      case MontageStyle.birthday:
-        base = 1800;
-        break;
-      case MontageStyle.travel:
-        base = 2400;
-        break;
-      case MontageStyle.newyear:
-        base = 2500;
-        break;
-      case MontageStyle.romance:
-        base = 3200;
-        break;
-      case MontageStyle.wedding:
-        base = 4000;
-        break;
-      case MontageStyle.nostalgia:
-        base = 4500;
-        break;
-      default:
-        base = 2800; // family
-    }
-    int dur = base;
-    if (a.isSlowPaced) dur += 600;
-    if (a.isFastPaced) dur -= 500;
-    dur = dur.clamp(1000, 5000);
-
-    // ---- Переход ----
-    final transitions = _transitionsFor(style);
-    final transition = index == 0
-        ? TransitionType.none
-        : transitions[index % transitions.length];
-
-    // ---- Появление ----
-    final entrances = _entrancesFor(style);
-    final entrance = entrances[index % entrances.length];
-    final entranceMs = _entranceMsFor(style);
-
-    // ---- Фильтр по настроению и стилю ----
-    final filter = _filterForMood(a.mood, style);
-
-    // ---- Умное центрирование лиц ----
-    final offsets = _smartOffsets(a, canvasAspect);
-
-    return MontageFramePlan(
-      imagePath: a.imagePath,
-      durationMs: dur,
-      transition: transition,
-      filter: filter,
-      entrance: entrance,
-      entranceDurationMs: entranceMs,
-      fitMode: FitMode.cover,
-      offsetX: offsets[0],
-      offsetY: offsets[1],
-    );
-  }
-
-  // ==========================================
-  // ✅ Наборы переходов по стилям (ИИ использует трендовые!)
-  // ==========================================
-  static List<TransitionType> _transitionsFor(MontageStyle style) {
-    switch (style) {
-      case MontageStyle.party:
-        // 🎉 Драйв: хлыст, RGB-глитч, вспышка
-        return [
-          TransitionType.whipPan,
-          TransitionType.rgbSplit,
-          TransitionType.flash,
-          TransitionType.glitch,
-          TransitionType.zoomOut,
-        ];
-      case MontageStyle.birthday:
-        // 🎂 Празднично: вспышка, круг, пролёт
-        return [
-          TransitionType.flash,
-          TransitionType.circleReveal,
-          TransitionType.crossZoom,
-          TransitionType.slideLeft,
-        ];
-      case MontageStyle.travel:
-        // 🗺 Динамика: пролёт, хлыст, слайды
-        return [
-          TransitionType.crossZoom,
-          TransitionType.slideLeft,
-          TransitionType.whipPan,
-          TransitionType.wipe,
-        ];
-      case MontageStyle.newyear:
-        // 🎄 Волшебно: круг, спин, пролёт
-        return [
-          TransitionType.circleReveal,
-          TransitionType.spinBlur,
-          TransitionType.crossZoom,
-          TransitionType.slideLeft,
-        ];
-      case MontageStyle.romance:
-        // 💕 Нежно: только плавные
-        return [
-          TransitionType.blur,
-          TransitionType.fade,
-          TransitionType.dissolve,
-        ];
-      case MontageStyle.wedding:
-        // 💍 Торжественно: только плавные
-        return [
-          TransitionType.fade,
-          TransitionType.dissolve,
-          TransitionType.blur,
-        ];
-      case MontageStyle.nostalgia:
-        // 📼 Задумчиво: только мягкие растворения
-        return [
-          TransitionType.dissolve,
-          TransitionType.fade,
-          TransitionType.blur,
-        ];
-      default: // family
-        return [
-          TransitionType.fade,
-          TransitionType.dissolve,
-          TransitionType.crossZoom,
-          TransitionType.circleReveal,
-        ];
-    }
-  }
-
-  // ==========================================
-  // Наборы появлений по стилям
-  // ==========================================
-  static List<EntranceAnimation> _entrancesFor(MontageStyle style) {
-    switch (style) {
-      case MontageStyle.party:
-        return [
-          EntranceAnimation.zoomIn,
-          EntranceAnimation.slideFromBottom,
-          EntranceAnimation.fadeIn,
-        ];
-      case MontageStyle.birthday:
-        return [
-          EntranceAnimation.zoomIn,
-          EntranceAnimation.slideFromLeft,
-          EntranceAnimation.slideFromRight,
-        ];
-      case MontageStyle.travel:
-        return [
-          EntranceAnimation.slideFromLeft,
-          EntranceAnimation.zoomIn,
-          EntranceAnimation.slideFromRight,
-        ];
-      case MontageStyle.newyear:
-        return [
-          EntranceAnimation.zoomIn,
-          EntranceAnimation.slideFromTop,
-          EntranceAnimation.fadeIn,
-        ];
-      case MontageStyle.romance:
-        return [
-          EntranceAnimation.fadeIn,
-          EntranceAnimation.zoomIn,
-          EntranceAnimation.fadeIn,
-        ];
-      case MontageStyle.wedding:
-        return [
-          EntranceAnimation.fadeIn,
-          EntranceAnimation.fadeIn,
-          EntranceAnimation.zoomIn,
-        ];
-      case MontageStyle.nostalgia:
-        return [
-          EntranceAnimation.fadeIn,
-          EntranceAnimation.fadeIn,
-          EntranceAnimation.fadeIn,
-        ];
-      default: // family
-        return [
-          EntranceAnimation.fadeIn,
-          EntranceAnimation.none,
-          EntranceAnimation.fadeIn,
-        ];
-    }
-  }
+      a.complexityScore + (a.hasSmile ? 0.3 : 0.0) + (a.faceCount > 0 ? 0.2 : 0.0);
 
   static int _entranceMsFor(MontageStyle style) {
     switch (style) {
-      case MontageStyle.party:
-        return 400;
-      case MontageStyle.birthday:
-        return 450;
-      case MontageStyle.newyear:
-        return 500;
-      case MontageStyle.romance:
-        return 600;
-      case MontageStyle.wedding:
-        return 700;
-      case MontageStyle.nostalgia:
-        return 800;
-      default:
-        return 500;
+      case MontageStyle.party: return 400;
+      case MontageStyle.birthday: return 450;
+      case MontageStyle.newyear: return 500;
+      case MontageStyle.romance: return 600;
+      case MontageStyle.wedding: return 700;
+      case MontageStyle.nostalgia: return 800;
+      default: return 500;
     }
   }
 
-  // ==========================================
-  // ✅ Фильтры: сепия НЕ используется в авто-подборе
-  // ==========================================
-  static FilterType _filterForMood(PhotoMood mood, MontageStyle style) {
-    const bright = ['vivid', 'bright', 'pop', 'saturated'];
-    const warm = ['warm', 'sunset', 'golden'];
-    const cool = ['cool', 'cold', 'winter'];
-    const soft = ['soft', 'fade', 'pastel'];
-
-    switch (style) {
-      case MontageStyle.party:
-        return _firstAvailable([...bright, ...warm]);
-      case MontageStyle.birthday:
-        if (mood == PhotoMood.cool) {
-          return _firstAvailable([...bright, ...warm]);
-        }
-        return _firstAvailable([...bright, ...warm, 'none']);
-      case MontageStyle.travel:
-        if (mood == PhotoMood.cool) {
-          return _firstAvailable([...cool, ...bright]);
-        }
-        return _firstAvailable([...bright, ...cool]);
-      case MontageStyle.newyear:
-        if (mood == PhotoMood.warm) {
-          return _firstAvailable([...warm, ...bright]);
-        }
-        return _firstAvailable([...cool, ...bright, 'none']);
-      case MontageStyle.romance:
-        return _firstAvailable([...warm, ...soft, 'vintage']);
-      case MontageStyle.wedding:
-        return _firstAvailable([...soft, ...warm, 'vintage']);
-      case MontageStyle.nostalgia:
-        return _firstAvailable(['vintage', ...soft, ...warm, 'none']);
-      case MontageStyle.family:
-        if (mood == PhotoMood.cool) return _firstAvailable(cool);
-        if (mood == PhotoMood.vibrant) return _firstAvailable(bright);
-        return _firstAvailable([...warm, 'none']);
-      default:
-        break;
-    }
-
-    switch (mood) {
-      case PhotoMood.warm:
-        return _firstAvailable(warm);
-      case PhotoMood.cool:
-        return _firstAvailable(cool);
-      case PhotoMood.vibrant:
-        return _firstAvailable(bright);
-      case PhotoMood.muted:
-        return _firstAvailable([...soft, ...warm, 'none']);
-      default:
-        return FilterType.none;
-    }
-  }
-
-  static FilterType _firstAvailable(List<String> names) {
-    for (final n in names) {
-      if (n == 'none') return FilterType.none;
-      for (final f in FilterType.values) {
-        if (f.name == n) return f;
-      }
-    }
-    return FilterType.none;
-  }
-
-  // ==========================================
-  // Умное центрирование лиц в cover-режиме
-  // ==========================================
-  static List<double> _smartOffsets(
-      SmartPhotoAnalysis a, double canvasAspect) {
+  static List<double> _smartOffsets(SmartPhotoAnalysis a, double canvasAspect) {
     if (a.faceCenterX == null || a.faceCenterY == null) return [0.0, 0.0];
-
     final ia = a.aspectRatio;
     final ca = canvasAspect;
-
     final base = math.max(ca / ia, 1.0);
     final drawW = ia * base;
     final drawH = base;
     final freeX = (ca - drawW).abs() / 2;
     final freeY = (1.0 - drawH).abs() / 2;
-
-    double ox = 0;
-    double oy = 0;
-    if (freeX > 0.001) {
-      ox = (drawW * (0.5 - a.faceCenterX!) / freeX).clamp(-1.0, 1.0);
-    }
-    if (freeY > 0.001) {
-      oy = (drawH * (0.5 - a.faceCenterY!) / freeY).clamp(-1.0, 1.0);
-    }
+    double ox = 0, oy = 0;
+    if (freeX > 0.001) ox = (drawW * (0.5 - a.faceCenterX!) / freeX).clamp(-1.0, 1.0);
+    if (freeY > 0.001) oy = (drawH * (0.5 - a.faceCenterY!) / freeY).clamp(-1.0, 1.0);
     return [ox, oy];
   }
 }

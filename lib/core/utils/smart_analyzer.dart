@@ -333,6 +333,8 @@ Future<_ColorAnalysis> _analyzeColors(ui.Image image) async {
       if (h > 180 && h < 270 && s > 0.3) coolPixels++;
       // Яркие: высокая насыщенность
       if (s > 0.6) vibrantPixels++;
+      // ✅ Лето/природа: зелёный (90–170°) считаем ярким, иначе небо всё портит
+      if (h > 90 && h < 170 && s > 0.3) vibrantPixels++;
       // Приглушённые: ужесточённый порог (реже срабатывает)
       if (s < 0.25 && l > 0.35 && l < 0.65) mutedPixels++;
 

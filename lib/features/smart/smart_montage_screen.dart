@@ -13,6 +13,7 @@ import '../../core/utils/smart_analyzer.dart';
 import '../../core/utils/smart_montage.dart';
 import '../../data/models/audio_track.dart';
 import '../../data/models/photo_layer.dart';
+import '../../data/models/video_project.dart'; // ✅ OverlayType для _PlanCard
 import '../../data/providers/project_provider.dart';
 import '../../data/services/bundled_music_service.dart';
 import '../../data/services/media_storage_service.dart';
@@ -41,11 +42,17 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
   BeatAnalysis? _beats;
   bool _beatsLoading = false;
 
+  // ✅ Геном: seed для re-roll + профиль музыки (энергия → темп/драйв)
+  int _seed = 1;
+  MusicProfile? _musicProfile;
+
   List<MontageFramePlan> get _plans {
     final base = SmartMontage.generate(
       analyses: _analyses,
       style: _style,
       canvasAspect: ref.read(currentProjectProvider).format.aspectRatio,
+      seed: _seed,
+      music: _musicProfile,
     );
     if (!_beatSync || _beats == null || !_beats!.isValid) return base;
     return [
@@ -56,22 +63,17 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
 
   MontageFramePlan _withBeatDuration(
       MontageFramePlan p, int i, List<double> beats) {
-    const k = 2;
+    // ✅ темп из генома (1/2/4 бита на кадр)
+    final k = p.beatsPerFrame;
     final s = i * k;
     if (s >= beats.length - 1) return p;
     final e = math.min((i + 1) * k, beats.length - 1);
-    final sec = (beats[e] - beats[s]).clamp(0.8, 6.0);
-    return MontageFramePlan(
-      imagePath: p.imagePath,
-      durationMs: (sec * 1000).round(),
-      transition: p.transition,
-      filter: p.filter,
-      entrance: p.entrance,
-      entranceDurationMs: p.entranceDurationMs,
-      fitMode: p.fitMode,
-      offsetX: p.offsetX,
-      offsetY: p.offsetY,
-    );
+    // ✅ мягкие переходы держим до 6s, динамичные — не дольше 3.5s
+    final soft = p.transition == TransitionType.fade ||
+        p.transition == TransitionType.dissolve ||
+        p.transition == TransitionType.blur;
+    final sec = (beats[e] - beats[s]).clamp(0.8, soft ? 6.0 : 3.5);
+    return p.copyWith(durationMs: (sec * 1000).round());
   }
 
   @override
@@ -141,9 +143,16 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
     });
     final analysis = await BeatDetector.detectBeats(file.path);
     if (!mounted) return;
+    // ✅ профиль музыки: энергия волны + плотность битов + тег bundled-стиля
+    final name = file.uri.pathSegments.last;
+    final parts = name.split('_');
+    final tag = BundledMusicService.isBundled(file) && parts.length > 1
+        ? parts[1]
+        : null;
     setState(() {
       _beats = analysis;
       _beatsLoading = false;
+      _musicProfile = MusicProfile.fromBeats(analysis, tag: tag);
     });
   }
 
@@ -210,6 +219,10 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
         notifier.updatePhotoTransition(idx, plan.transition);
         notifier.updatePhotoEntranceAnimation(idx, plan.entrance);
         notifier.updatePhotoEntranceDuration(idx, plan.entranceDurationMs);
+        // ✅ новые гены: движение, оверлей, микро-зум-кейфреймы
+        notifier.updatePhotoLiveMotion(idx, plan.liveMotion);
+        notifier.updatePhotoOverlay(idx, plan.overlayType, plan.overlayIntensity);
+        notifier.setKeyframes(idx, plan.keyframes);
       }
 
       if (_selectedMusic != null) {
@@ -278,6 +291,19 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
           'Умный монтаж',
           style: GoogleFonts.unbounded(fontSize: 18, fontWeight: FontWeight.w700),
         ),
+        // ✅ re-roll: новый seed → новый геном (скрещивание пресетов)
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.casino, color: AppColors.primary),
+            tooltip: 'Ещё вариант',
+            onPressed: _analyzing
+                ? null
+                : () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _seed++);
+                  },
+          ),
+        ],
       ),
       body: _analyzing
           ? Center(
@@ -309,6 +335,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
   Widget _buildContent(List<MontageFramePlan> plans) {
     final totalFaces = _analyses.fold<int>(0, (s, a) => s + a.faceCount);
     final smiles = _analyses.where((a) => a.hasSmile).length;
+    final k = plans.isNotEmpty ? plans.first.beatsPerFrame : 2;
 
     return Column(
       children: [
@@ -322,7 +349,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                'Авто-детект определяет 4 базовых стиля. Тематические — выбирайте вручную.',
+                'Авто-детект скорит все 8 тем по фото и музыке. 🎲 — новый вариант.',
                 style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted, height: 1.3),
               ),
               const SizedBox(height: 8),
@@ -393,7 +420,6 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
 
               if (_selectedMusic != null) ...[
                 const SizedBox(height: 8),
-                // ✅ ИСПРАВЛЕНО: Замена SwitchListTile на Row + Switch для устранения предупреждения Flutter
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
@@ -420,7 +446,7 @@ class _SmartMontageScreenState extends ConsumerState<SmartMontageScreen> {
                               _beatsLoading
                                   ? 'Анализирую биты…'
                                   : (_beats != null && _beats!.isValid
-                                      ? 'Кадр = 2 бита • BPM ~${_beats!.bpm.round()}'
+                                      ? 'Кадр = $k ${k == 1 ? 'бит' : 'бита'} • BPM ~${_beats!.bpm.round()}'
                                       : 'Биты не найдены — темп по стилю'),
                               style: GoogleFonts.manrope(
                                 fontSize: 11,
@@ -692,6 +718,14 @@ class _PlanCard extends StatelessWidget {
                 Text(
                   '${TransitionPresets.label(plan.transition)} • ${FilterPresets.label(plan.filter)}',
                   style: GoogleFonts.manrope(fontSize: 11, color: AppColors.textMuted),
+                ),
+                const SizedBox(height: 2),
+                // ✅ видно движение и оверлей из генома
+                Text(
+                  '${LiveMotionPresets.label(plan.liveMotion)}'
+                  '${plan.overlayType != OverlayType.none ? ' • оверлей' : ''}'
+                  '${plan.keyframes.isNotEmpty ? ' • микро-зум' : ''}',
+                  style: GoogleFonts.manrope(fontSize: 10, color: AppColors.textMuted),
                 ),
               ],
             ),
